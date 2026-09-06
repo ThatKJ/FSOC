@@ -572,3 +572,61 @@ phase; **not implemented, not scheduled as Stage 3.**
 **Scope of this ADR.** Documentation / architecture-decision only. No C++ written, no Python
 training code touched, no model retrained, `v1_baseline` / PID / Step-10 gates untouched. Stage
 3 has not started.
+
+## ADR-019 — P0-v2: minimal state estimator implements the ADR-018 §9 temporal gate; Hybrid V2 = Hybrid + tracker
+
+**Status:** Accepted and implemented (`fsoc::TargetTracker`, `include/fsoc/target_tracker.hpp`),
+additive and default-off (`tracker_enabled = false`); `v1_baseline`, PID gains, the classical
+detector algorithm, and `resolve_perception()` itself are all untouched.
+
+ADR-018 §9 (`docs/19 §9`) documented — but explicitly deferred — a future runtime
+motion-consistency gate: "previous accepted track + current candidate + a consistency check,
+decided from runtime observation history only." The MVP-V2 completion pass required a minimal
+state estimator (Phase B) and, separately, a fix for the clutter false-lock weakness Stage-4
+measured (`docs/MVP_METRICS.md §2`: 44.9% common-frame FPR, 2,240 severe closed-loop outliers
+`>50px` for Classical). Building the estimator as an alpha-beta (g-h) filter with a temporal
+outlier gate (`TargetTracker::update`, `outlier_gate_px`) directly IS the ADR-018 §9 gate — this
+ADR records that the prerequisite it named now exists, tested, and measured.
+
+**What was NOT changed.** `resolve_perception()` (ADR-018's fusion policy: agreement / classical
+/ AI-only-rejected / disagreement-rejected / none) is byte-for-byte unchanged. The classical
+detector algorithm is unchanged. The tracker is a NEW, separate, purely additive stage layered
+**after** `resolve_perception()` — exactly the seam ADR-016 established for `PerceptionMode`
+itself: default off, bit-identical when disabled (regression-tested in both
+`tests/step7_tests.cpp` and `tests/stage4_determinism_tests.cpp`).
+
+**Root cause found (not assumed).** An early version of this gate, evaluated empirically via
+the new `stage4_tracker_ablation` tool (`docs/MVP_ABLATION.md`), showed the tracker could make
+outcomes *worse* on Stage-4's `BrightDistractor` scenario: `TargetTracker`'s original acquisition
+logic confirmed `Acquiring -> Tracking` after N consecutive measurements regardless of whether
+they agreed with each other. Because Stage-4's distractor is placed at a uniformly random
+position, independent of the beacon, and re-rolled every frame (`stage4_degradation.cpp
+apply_clutter`), a bad acquisition could confirm a stable lock on 3 mutually inconsistent
+clutter positions just as readily as 3 consistent real-beacon ones — and once "confirmed," the
+established-track outlier gate then rejected the *real* beacon as the outlier. Fix: acquisition
+now also checks each new candidate against `outlier_gate_px`; an inconsistent candidate restarts
+acquisition fresh rather than counting toward confirmation (`TargetTracker::begin_acquisition`).
+
+**Hybrid V2 — the combined policy.** "Hybrid V2" is not a new `PerceptionMode` value (ADR-018's
+enum stays frozen) — it is `PerceptionMode::Hybrid` with the tracker enabled downstream
+(`SimulationRunnerConfig::tracker_enabled = true`, or the equivalent optional parameter on
+`stage4::run_closed_loop_scenario_mode_seed`). Measured over the full frozen Stage-4 closed-loop
+protocol (11 scenarios x 5 seeds x 8s @ 50Hz, `docs/MVP_ABLATION.md`): severe (`>50px`) control
+outliers fall from 1,808 (Hybrid) to 9 (Hybrid+Tracker) — a 99.5% reduction — at a coverage cost
+of roughly 20 percentage points (97.35% -> 77.05% accepted-detection fraction), concentrated
+almost entirely in the two adversarial-clutter scenarios; the 9 non-adversarial scenarios lose
+only the ~0.5-point acquisition-ramp cost with zero change in outlier counts.
+
+**Deferred, still not implemented — AI-only reacquisition.** ADR-018 case 3 (AI-only candidate,
+no control authority) is UNCHANGED by this ADR. The gate built here filters whatever
+`resolve_perception()` already outputs; it does not yet let a tracker-consistent AI-only
+candidate through `resolve_perception()` itself when Classical produces nothing. That specific
+extension — described precisely in `docs/19 §9` — is now technically unblocked (the prerequisite
+gate exists and is tested) but remains a distinct, unimplemented change to the frozen fusion
+policy, out of scope for this ADR.
+
+**Scope of this ADR.** `include/fsoc/target_tracker.hpp` / `src/target_tracker.cpp` (new,
+additive module), `SimulationRunner`/`stage4_closed_loop_bench` wiring (both additive, default
+off, bit-identical-when-disabled, regression-tested), `apps/stage4_tracker_ablation.cpp` (new
+evaluation tool). `resolve_perception()`, the classical detector, PID gains, and `v1_baseline`
+are untouched.

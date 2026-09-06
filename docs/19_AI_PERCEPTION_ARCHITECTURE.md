@@ -224,10 +224,19 @@ Phase 2 spatio-temporal (3-frame) detector · Phase 3 UKF state estimation ·
 Phase 4 motion prediction / feed-forward · Phase 5 MPC · Phase 6 satellite
 ephemeris + SGP4 coarse pointing · Phase 7 real camera + physical gimbal.
 
-## 9. Future temporal reacquisition gate (ADR-018 — documented only, not implemented)
+## 9. Future temporal reacquisition gate (ADR-018 → implemented by ADR-019, AI-only case still deferred)
+
+**Update (ADR-019, P0-v2):** the prerequisite this section named — a runtime
+motion-consistency gate, decided from observation history only — now EXISTS and is
+tested: `fsoc::TargetTracker` (`include/fsoc/target_tracker.hpp`), an alpha-beta
+filter with an `outlier_gate_px` temporal-consistency check, additive and default-off.
+It is layered AFTER `resolve_perception()` (gating whatever Classical/Hybrid already
+produced), not inside it — so the specific reacquisition path described below (letting
+an AI-only candidate through `resolve_perception()` itself) remains unimplemented; see
+ADR-019 and `docs/MVP_ABLATION.md` for what was measured and what is still open.
 
 Safe Hybrid case 3 (§5) gives AI-only detections no control authority because a
-single frame cannot confirm target identity. That may be safely reconsidered once
+single frame cannot confirm target identity. That may be safely reconsidered now that
 a runtime motion-consistency gate exists — this is the Phase-2 spatio-temporal
 detector (§8) made concrete for the AI-only case specifically:
 
@@ -250,5 +259,6 @@ exactly as it does to the classical and AI detectors themselves.
 
 This is the proper mechanism for resolving single-frame target-identity ambiguity —
 **not** a wider `agreement_radius_px`, **not** a confidence override on cases 3/4.
-Not scheduled as Stage 3; not implemented; no interface frozen here beyond the
-constraint above.
+The gate itself is implemented (ADR-019); letting it unlock AI-only reacquisition
+through `resolve_perception()` specifically is not — no interface frozen here beyond
+the constraint above.

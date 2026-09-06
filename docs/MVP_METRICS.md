@@ -78,6 +78,15 @@ including two known scenario-config caveats discovered during evaluation and lef
 uncorrected per the frozen-protocol rule: `docs/21_AI_STAGE4_EVALUATION_PROTOCOL.md`
 and the Stage-4 checkpoint report in this session's history.
 
+**Follow-up (P0-v2, additive, does not alter the numbers above):** `docs/MVP_ABLATION.md`
+investigates this weakness at a candidate-evidence level and measures a mitigation
+(`fsoc::TargetTracker`'s temporal-consistency gate, default OFF) that cuts severe
+(`>50px`) closed-loop outliers from 2,240 (Classical) / 1,808 (Hybrid) down to 12 / 9
+respectively (>99% reduction) at a real, honestly-reported coverage cost (~20-22
+percentage points pooled, concentrated in the two adversarial-clutter scenarios). The
+common-frame 44.9% FPR itself is unchanged and unchangeable without touching the frozen
+classical detector algorithm — see that document for the full before/after.
+
 ## 3. TinyBeaconNet — training, export, and C++ inference
 
 | metric | value | source |
