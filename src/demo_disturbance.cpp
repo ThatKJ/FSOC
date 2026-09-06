@@ -21,11 +21,15 @@ void DemoDisturbanceConfig::validate() const {
     if (!(std::isfinite(noise_sigma) && noise_sigma >= 0.0)) {
         throw std::invalid_argument("DemoDisturbanceConfig: noise_sigma must be finite and >= 0.");
     }
-    if (!(std::isfinite(distractor_peak) && distractor_peak >= 0.0 && distractor_peak <= 255.0)) {
-        throw std::invalid_argument("DemoDisturbanceConfig: distractor_peak must be finite in [0, 255].");
+    if (!(std::isfinite(distractor_peak_lo) && std::isfinite(distractor_peak_hi) && distractor_peak_lo >= 0.0 &&
+          distractor_peak_hi <= 255.0 && distractor_peak_lo <= distractor_peak_hi)) {
+        throw std::invalid_argument(
+            "DemoDisturbanceConfig: distractor_peak_lo/hi must be finite, in [0, 255], with lo <= hi.");
     }
-    if (!(std::isfinite(distractor_sigma_px) && distractor_sigma_px > 0.0)) {
-        throw std::invalid_argument("DemoDisturbanceConfig: distractor_sigma_px must be finite and > 0.");
+    if (!(std::isfinite(distractor_sigma_lo) && std::isfinite(distractor_sigma_hi) && distractor_sigma_lo > 0.0 &&
+          distractor_sigma_lo <= distractor_sigma_hi)) {
+        throw std::invalid_argument(
+            "DemoDisturbanceConfig: distractor_sigma_lo/hi must be finite, > 0, with lo <= hi.");
     }
 }
 
@@ -96,7 +100,9 @@ cv::Mat apply_demo_disturbance(
     // position -- it only sees the already-rendered pixels).
     std::uniform_real_distribution<double> ux{0.0, static_cast<double>(out.cols - 1)};
     std::uniform_real_distribution<double> uy{0.0, static_cast<double>(out.rows - 1)};
-    add_gaussian_blob(out, ux(rng), uy(rng), config.distractor_peak, config.distractor_sigma_px);
+    std::uniform_real_distribution<double> upeak{config.distractor_peak_lo, config.distractor_peak_hi};
+    std::uniform_real_distribution<double> usigma{config.distractor_sigma_lo, config.distractor_sigma_hi};
+    add_gaussian_blob(out, ux(rng), uy(rng), upeak(rng), usigma(rng));
     return out;
 }
 

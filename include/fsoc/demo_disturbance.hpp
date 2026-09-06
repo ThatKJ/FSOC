@@ -41,13 +41,17 @@ struct DemoDisturbanceConfig {
     double noise_sigma{0.0};
 
     // Clutter: one Gaussian blob at a uniformly random (x,y), independent of
-    // the beacon and re-rolled every frame -- the same conceptual shape as
-    // Stage-4's BrightDistractor (docs/MVP_ABLATION.md §3), deliberately
-    // brighter/larger than the default beacon (peak=255, sigma=2.0px,
-    // RendererConfig) so Classical's brightest-connected-component rule
-    // genuinely has to choose between them.
-    double distractor_peak{255.0};
-    double distractor_sigma_px{3.0};
+    // the beacon, with peak/sigma ALSO uniformly randomized within these
+    // ranges and re-rolled every frame -- the same conceptual shape as
+    // Stage-4's BrightDistractor (docs/MVP_ABLATION.md §3). The default
+    // range straddles the beacon's own integrated signal (peak=255,
+    // sigma=2.0px, RendererConfig -> ~1020) so which blob Classical's
+    // brightest-connected-component rule picks genuinely varies frame to
+    // frame, instead of one blob deterministically always winning.
+    double distractor_peak_lo{200.0};
+    double distractor_peak_hi{255.0};
+    double distractor_sigma_lo{1.6};
+    double distractor_sigma_hi{2.6};
 
     // Occlusion: within the half-open frame-index window
     // [occlusion_start_frame, occlusion_start_frame + occlusion_duration_frames),
@@ -62,9 +66,10 @@ struct DemoDisturbanceConfig {
     std::size_t occlusion_duration_frames{0};
     std::uint8_t occlusion_background_intensity{5};  // matches RendererConfig's own default
 
-    // noise_sigma >= 0; distractor_peak in [0,255]; distractor_sigma_px finite > 0.
-    // Throws std::invalid_argument otherwise. occlusion_* fields have no
-    // invalid range (any std::size_t / std::uint8_t value is acceptable; a
+    // noise_sigma >= 0; distractor_peak_lo/hi in [0,255] with lo <= hi;
+    // distractor_sigma_lo/hi finite > 0 with lo <= hi. Throws
+    // std::invalid_argument otherwise. occlusion_* fields have no invalid
+    // range (any std::size_t / std::uint8_t value is acceptable; a
     // zero-length window is simply never active).
     void validate() const;
 };

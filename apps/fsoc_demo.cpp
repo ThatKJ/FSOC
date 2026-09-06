@@ -109,6 +109,73 @@ void print_status_line(
     std::cout << '\n';
 }
 
+// Shared execution path for both a plain DemoScenario run and a Phase J
+// named disturbance preset: prints the header, steps to completion (printing
+// a status line every kPrintEvery frames and optionally logging CSV), then
+// prints the end-of-run summary. Every value comes from `session` itself or
+// the caller-supplied, already-resolved display strings -- this function
+// adds no physics, no control, no new state.
+int run_demo_loop(
+    DemoSession& session, const std::string& scenario_line, const std::string& detail_line,
+    const std::string& perception_line, const std::string& tracker_line, const std::string& summary_label,
+    const bool show_perception, const bool show_tracker, const std::string& csv_path, const bool quiet) {
+    std::optional<CsvTelemetryLogger> logger;
+    if (!csv_path.empty()) {
+        logger.emplace(csv_path);
+        logger->write_header();
+    }
+
+    std::cout << "scenario : " << scenario_line << "\n"
+              << "detail   : " << detail_line << "\n"
+              << "duration : " << std::fixed << std::setprecision(2) << session.duration_s() << " s  ("
+              << session.total_frames() << " frames @ 50 Hz, dt = 0.02 s)\n"
+              << "control  : "
+              << (session.runner_config().control_enabled ? "ENABLED (closed loop)" : "DISABLED (open loop)")
+              << "\n"
+              << "perception: " << perception_line << "\n"
+              << "tracker  : " << tracker_line << "\n\n";
+
+    std::vector<TelemetryRecord> records;
+    records.reserve(session.total_frames());
+
+    constexpr std::size_t kPrintEvery = 25;  // 0.5 s at 50 Hz
+    const auto wall_start = std::chrono::steady_clock::now();
+
+    while (!session.finished()) {
+        const DemoSnapshot snapshot = session.step();
+        records.push_back(session.last_telemetry());
+        if (logger.has_value()) {
+            logger->record(session.last_telemetry());
+        }
+        if (!quiet && (snapshot.frame_index % kPrintEvery == 0 || session.finished())) {
+            print_status_line(snapshot, session.last_telemetry(), show_perception, show_tracker);
+        }
+    }
+
+    const auto wall_end = std::chrono::steady_clock::now();
+    const double wall_s = std::chrono::duration<double>(wall_end - wall_start).count();
+
+    const BenchmarkMetrics metrics = compute_benchmark_metrics(records, wall_s);
+
+    std::cout << "\n--- summary : " << summary_label << " ---\n"
+              << "frames             : " << metrics.frames << "\n"
+              << "detection          : " << std::fixed << std::setprecision(1)
+              << 100.0 * metrics.detection_fraction << " %\n"
+              << "RMS angular error  : " << std::setprecision(4) << rad_to_deg(metrics.rms_angular_error_rad)
+              << " deg\n"
+              << "P95 angular error  : " << rad_to_deg(metrics.p95_angular_error_rad) << " deg\n"
+              << "max angular error  : " << rad_to_deg(metrics.max_angular_error_rad) << " deg\n"
+              << "final angular error: " << rad_to_deg(metrics.final_angular_error_rad) << " deg\n"
+              << "lost frames        : " << metrics.lost_frames << " / " << metrics.frames << "\n";
+    if (logger.has_value()) {
+        std::cout << "csv                : " << csv_path << "  (" << logger->records_written() << " rows)\n";
+    }
+    std::cout << "clocks             : simulation 50 Hz (authoritative)  |  processing " << std::setprecision(0)
+              << metrics.processing_fps << " FPS (wall, informational)\n";
+
+    return 0;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -122,6 +189,7 @@ int main(int argc, char** argv) {
     }
 
     std::optional<DemoScenario> scenario;
+    std::optional<DemoDisturbanceScenario> disturbance_preset;
     std::optional<double> duration_override;
     std::string csv_path;
     bool quiet = false;
@@ -164,9 +232,15 @@ int main(int argc, char** argv) {
             csv_path = args[++i];
         } else if (!arg.empty() && arg.front() == '-') {
             return usage_error("unknown option: " + arg);
-        } else if (!scenario.has_value()) {
-            scenario = parse_demo_scenario(arg);
-            if (!scenario.has_value()) {
+        } else if (!scenario.has_value() && !disturbance_preset.has_value()) {
+            // A disturbance-preset token (Phase J: "normal", "noise", "occlusion",
+            // "clutter", "reacquisition") is checked FIRST -- it is a distinct,
+            // self-contained named condition, not a DemoScenario.
+            disturbance_preset = parse_demo_disturbance_scenario(arg);
+            if (!disturbance_preset.has_value()) {
+                scenario = parse_demo_scenario(arg);
+            }
+            if (!scenario.has_value() && !disturbance_preset.has_value()) {
                 return usage_error("unknown scenario: '" + arg + "'");
             }
         } else {
@@ -174,8 +248,51 @@ int main(int argc, char** argv) {
         }
     }
 
-    if (!scenario.has_value()) {
+    if (!scenario.has_value() && !disturbance_preset.has_value()) {
         return usage_error("no scenario given");
+    }
+    if (disturbance_preset.has_value() &&
+        (mode_token != "classical" || tracker_enabled || duration_override.has_value())) {
+        return usage_error(
+            "disturbance presets (normal/noise/occlusion/clutter/reacquisition) already fix "
+            "--mode/--tracker/--duration; do not combine them");
+    }
+
+    // ---- Phase J: named disturbance preset -- a separate, self-contained path ----
+    // Every preset either uses Classical (Normal/Noise: default_ai_detector_config()
+    // is harmless and unused) or REQUIRES it (Occlusion/Clutter/Reacquisition are
+    // Hybrid+Tracker) -- so the model is always attempted, and only the
+    // AI-requiring presets can actually fail here.
+    if (disturbance_preset.has_value()) {
+        const bool preset_wants_hybrid = *disturbance_preset != DemoDisturbanceScenario::Normal &&
+                                          *disturbance_preset != DemoDisturbanceScenario::Noise;
+        std::optional<AiBeaconDetectorConfig> preset_ai_detector = default_ai_detector_config();
+        std::unique_ptr<DemoSession> preset_session;
+        bool preset_ran_as_designed = true;
+        try {
+            preset_session = std::make_unique<DemoSession>(*disturbance_preset, preset_ai_detector);
+        } catch (const std::exception& e) {
+            std::cerr << "fsoc_demo: WARNING: could not start disturbance preset '"
+                      << demo_disturbance_scenario_token(*disturbance_preset) << "' (" << e.what() << ")\n"
+                      << "fsoc_demo: falling back to the plain Classical baseline (model path: "
+                      << preset_ai_detector->model_path << ")\n\n";
+            preset_session = std::make_unique<DemoSession>(DemoScenario::StaticAcquisition, 6.0);
+            preset_ran_as_designed = false;
+        }
+        const bool preset_hybrid_active = preset_ran_as_designed && preset_wants_hybrid;
+        const std::string preset_perception_line =
+            preset_ran_as_designed
+                ? (preset_wants_hybrid ? "HYBRID  (Stage-3 C++ ONNX inference, models/tiny_beacon_net.onnx)"
+                                       : "CLASSICAL  (validated v1 baseline)")
+                : "CLASSICAL  (fallback -- disturbance preset failed to start, see WARNING above)";
+        const std::string preset_tracker_line =
+            preset_hybrid_active ? "ENABLED (alpha-beta estimator + temporal gate)" : "disabled";
+        return run_demo_loop(
+            *preset_session, std::string(to_string(*disturbance_preset)) + "  (" +
+                                  std::string(demo_disturbance_scenario_token(*disturbance_preset)) + ")",
+            std::string(demo_disturbance_scenario_description(*disturbance_preset)), preset_perception_line,
+            preset_tracker_line, std::string(to_string(*disturbance_preset)), preset_hybrid_active,
+            preset_hybrid_active, csv_path, quiet);
     }
 
     const PerceptionMode requested_mode = *parse_perception_mode(mode_token);
@@ -214,70 +331,17 @@ int main(int argc, char** argv) {
     }
     DemoSession& session = *session_ptr;
 
-    std::optional<CsvTelemetryLogger> logger;
-    if (!csv_path.empty()) {
-        logger.emplace(csv_path);
-        logger->write_header();
-    }
-
-    std::cout << "scenario : " << to_string(session.scenario()) << "  ("
-              << demo_scenario_token(session.scenario()) << ")\n"
-              << "detail   : " << demo_scenario_description(session.scenario()) << "\n"
-              << "duration : " << std::fixed << std::setprecision(2) << session.duration_s()
-              << " s  (" << session.total_frames() << " frames @ 50 Hz, dt = 0.02 s)\n"
-              << "control  : "
-              << (session.runner_config().control_enabled ? "ENABLED (closed loop)"
-                                                          : "DISABLED (open loop)")
-              << "\n"
-              << "perception: " << to_string(active_mode)
-              << (active_mode == PerceptionMode::Classical
-                      ? "  (validated v1 baseline)"
-                      : "  (Stage-3 C++ ONNX inference, models/tiny_beacon_net.onnx)")
-              << "\n"
-              << "tracker  : " << (active_tracker_enabled ? "ENABLED (alpha-beta estimator + temporal gate)"
-                                                            : "disabled")
-              << "\n\n";
-
-    std::vector<TelemetryRecord> records;
-    records.reserve(session.total_frames());
-
-    constexpr std::size_t kPrintEvery = 25;  // 0.5 s at 50 Hz
-    const auto wall_start = std::chrono::steady_clock::now();
-
-    while (!session.finished()) {
-        const DemoSnapshot snapshot = session.step();
-        records.push_back(session.last_telemetry());
-        if (logger.has_value()) {
-            logger->record(session.last_telemetry());
-        }
-        if (!quiet && (snapshot.frame_index % kPrintEvery == 0 || session.finished())) {
-            print_status_line(
-                snapshot, session.last_telemetry(), active_mode != PerceptionMode::Classical,
-                active_tracker_enabled);
-        }
-    }
-
-    const auto wall_end = std::chrono::steady_clock::now();
-    const double wall_s = std::chrono::duration<double>(wall_end - wall_start).count();
-
-    const BenchmarkMetrics metrics = compute_benchmark_metrics(records, wall_s);
-
-    std::cout << "\n--- summary : " << to_string(session.scenario()) << " ---\n"
-              << "frames             : " << metrics.frames << "\n"
-              << "detection          : " << std::fixed << std::setprecision(1)
-              << 100.0 * metrics.detection_fraction << " %\n"
-              << "RMS angular error  : " << std::setprecision(4)
-              << rad_to_deg(metrics.rms_angular_error_rad) << " deg\n"
-              << "P95 angular error  : " << rad_to_deg(metrics.p95_angular_error_rad) << " deg\n"
-              << "max angular error  : " << rad_to_deg(metrics.max_angular_error_rad) << " deg\n"
-              << "final angular error: " << rad_to_deg(metrics.final_angular_error_rad) << " deg\n"
-              << "lost frames        : " << metrics.lost_frames << " / " << metrics.frames << "\n";
-    if (logger.has_value()) {
-        std::cout << "csv                : " << csv_path << "  (" << logger->records_written()
-                  << " rows)\n";
-    }
-    std::cout << "clocks             : simulation 50 Hz (authoritative)  |  processing "
-              << std::setprecision(0) << metrics.processing_fps << " FPS (wall, informational)\n";
-
-    return 0;
+    const std::string perception_line =
+        std::string(to_string(active_mode)) +
+        (active_mode == PerceptionMode::Classical ? "  (validated v1 baseline)"
+                                                   : "  (Stage-3 C++ ONNX inference, models/tiny_beacon_net.onnx)");
+    const std::string tracker_line =
+        active_tracker_enabled ? "ENABLED (alpha-beta estimator + temporal gate)" : "disabled";
+    return run_demo_loop(
+        session,
+        std::string(to_string(session.scenario())) + "  (" + std::string(demo_scenario_token(session.scenario())) +
+            ")",
+        std::string(demo_scenario_description(session.scenario())), perception_line, tracker_line,
+        std::string(to_string(session.scenario())), active_mode != PerceptionMode::Classical,
+        active_tracker_enabled, csv_path, quiet);
 }

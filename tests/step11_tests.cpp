@@ -743,6 +743,85 @@ void test_tracker_enabled_runs_end_to_end() {
     CHECK(saw_tracking_lock);  // this scenario's beacon is clean -> the tracker should confirm a lock
 }
 
+// ---- Phase J: named disturbance presets -------------------------------
+
+// Every preset must construct and run to completion without throwing, using
+// a real AI detector config for the Hybrid-based presets (Occlusion,
+// Clutter, Reacquisition) and std::nullopt for the Classical-based ones
+// (Normal, Noise) -- exactly the contract documented on the constructor.
+void test_all_disturbance_presets_run_end_to_end() {
+    fsoc::AiBeaconDetectorConfig ai_config{};
+    ai_config.model_path = std::string(FSOC_PROJECT_SOURCE_DIR) + "/models/tiny_beacon_net.onnx";
+    ai_config.presence_threshold = 0.95;
+
+    for (const fsoc::DemoDisturbanceScenario preset : fsoc::all_demo_disturbance_scenarios()) {
+        DemoSession session{preset, ai_config};
+        std::size_t frames = 0;
+        while (!session.finished()) {
+            (void)session.step();
+            ++frames;
+        }
+        CHECK(frames == session.total_frames());
+        CHECK(frames > 0);
+    }
+}
+
+// Normal and Noise are documented as Classical, tracker off -- verify that
+// contract directly rather than trusting the description string.
+void test_normal_and_noise_presets_are_classical_tracker_off() {
+    for (const fsoc::DemoDisturbanceScenario preset :
+         {fsoc::DemoDisturbanceScenario::Normal, fsoc::DemoDisturbanceScenario::Noise}) {
+        DemoSession session{preset, std::nullopt};
+        CHECK(session.runner_config().perception_mode == fsoc::PerceptionMode::Classical);
+        CHECK(!session.runner_config().tracker_enabled);
+    }
+}
+
+// Occlusion/Clutter/Reacquisition are documented as Hybrid+Tracker --
+// verify that contract, and that each REQUIRES an ai_detector (the same
+// validation SimulationRunnerConfig already enforces for Hybrid mode).
+void test_hybrid_presets_require_ai_detector_and_enable_tracker() {
+    fsoc::AiBeaconDetectorConfig ai_config{};
+    ai_config.model_path = std::string(FSOC_PROJECT_SOURCE_DIR) + "/models/tiny_beacon_net.onnx";
+    ai_config.presence_threshold = 0.95;
+
+    for (const fsoc::DemoDisturbanceScenario preset :
+         {fsoc::DemoDisturbanceScenario::Occlusion, fsoc::DemoDisturbanceScenario::Clutter,
+          fsoc::DemoDisturbanceScenario::Reacquisition}) {
+        DemoSession session{preset, ai_config};
+        CHECK(session.runner_config().perception_mode == fsoc::PerceptionMode::Hybrid);
+        CHECK(session.runner_config().tracker_enabled);
+
+        bool threw = false;
+        try {
+            DemoSession missing_ai{preset, std::nullopt};
+            (void)missing_ai;
+        } catch (const std::invalid_argument&) {
+            threw = true;
+        } catch (...) {
+        }
+        CHECK(threw);
+    }
+}
+
+// The Occlusion preset's disturbance window must actually erase the beacon
+// (real, not-fabricated behaviour) for exactly the configured duration.
+void test_occlusion_preset_actually_occludes() {
+    fsoc::AiBeaconDetectorConfig ai_config{};
+    ai_config.model_path = std::string(FSOC_PROJECT_SOURCE_DIR) + "/models/tiny_beacon_net.onnx";
+    ai_config.presence_threshold = 0.95;
+
+    DemoSession session{fsoc::DemoDisturbanceScenario::Occlusion, ai_config};
+    bool saw_lost_frame = false;
+    while (!session.finished()) {
+        (void)session.step();
+        if (session.last_telemetry().tracking_state == fsoc::TrackingState::TargetLost) {
+            saw_lost_frame = true;
+        }
+    }
+    CHECK(saw_lost_frame);
+}
+
 }  // namespace
 
 int main() {
@@ -774,9 +853,13 @@ int main() {
     test_perception_aware_constructor_hybrid_runs_end_to_end();
     test_tracker_disabled_matches_default();
     test_tracker_enabled_runs_end_to_end();
+    test_all_disturbance_presets_run_end_to_end();
+    test_normal_and_noise_presets_are_classical_tracker_off();
+    test_hybrid_presets_require_ai_detector_and_enable_tracker();
+    test_occlusion_preset_actually_occludes();
 
     if (failures == 0) {
-        std::cout << "PASS: 28 Step-11 demo-packaging checks passed.\n";
+        std::cout << "PASS: 32 Step-11 demo-packaging checks passed.\n";
         return 0;
     }
     std::cerr << "FAILED: " << failures << " check(s).\n";

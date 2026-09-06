@@ -514,8 +514,10 @@ void test_disturbance_disabled_is_bit_identical_to_baseline() {
     fsoc::SimulationRunnerConfig cfg_with_unused_disturbance = cfg_plain;
     cfg_with_unused_disturbance.disturbance.kind = fsoc::DemoDisturbanceKind::None;
     cfg_with_unused_disturbance.disturbance.noise_sigma = 40.0;
-    cfg_with_unused_disturbance.disturbance.distractor_peak = 255.0;
-    cfg_with_unused_disturbance.disturbance.distractor_sigma_px = 8.0;
+    cfg_with_unused_disturbance.disturbance.distractor_peak_lo = 255.0;
+    cfg_with_unused_disturbance.disturbance.distractor_peak_hi = 255.0;
+    cfg_with_unused_disturbance.disturbance.distractor_sigma_lo = 8.0;
+    cfg_with_unused_disturbance.disturbance.distractor_sigma_hi = 8.0;
 
     const fsoc::StationaryTrajectory target{Vec3{100.0, 6.0, 4.0}};
     SimulationRunner a{cfg_plain, target};
@@ -567,8 +569,10 @@ void test_disturbance_noise_is_deterministic_and_changes_the_frame() {
 void test_disturbance_clutter_can_cause_false_lock() {
     fsoc::SimulationRunnerConfig cfg = fsoc::baseline_runner_config();
     cfg.disturbance.kind = fsoc::DemoDisturbanceKind::Clutter;
-    cfg.disturbance.distractor_peak = 255.0;
-    cfg.disturbance.distractor_sigma_px = 6.0;  // larger integrated signal than the beacon (sigma=2.0)
+    cfg.disturbance.distractor_peak_lo = 255.0;
+    cfg.disturbance.distractor_peak_hi = 255.0;
+    cfg.disturbance.distractor_sigma_lo = 6.0;  // larger integrated signal than the beacon (sigma=2.0)
+    cfg.disturbance.distractor_sigma_hi = 6.0;
 
     const fsoc::StationaryTrajectory target{Vec3{100.0, 6.0, 4.0}};
     SimulationRunner runner{cfg, target};
@@ -610,7 +614,7 @@ void test_disturbance_invalid_config_rejected() {
 
     fsoc::SimulationRunnerConfig cfg2 = fsoc::baseline_runner_config();
     cfg2.disturbance.kind = fsoc::DemoDisturbanceKind::Clutter;
-    cfg2.disturbance.distractor_peak = 300.0;
+    cfg2.disturbance.distractor_peak_hi = 300.0;
     CHECK_THROWS_INVALID(cfg2.validate());
 }
 
