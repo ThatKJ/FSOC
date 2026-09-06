@@ -59,6 +59,26 @@ void TargetTracker::reset() noexcept {
     consecutive_measurements_ = 0;
 }
 
+void TargetTracker::begin_acquisition(const ImagePoint& measurement) {
+    // Velocity is reset to 0 -- a stale velocity from a previous, unrelated
+    // (or just-discarded) track must never poison a new one.
+    state_.x_px = measurement.x_px;
+    state_.y_px = measurement.y_px;
+    state_.vx_px_s = 0.0;
+    state_.vy_px_s = 0.0;
+    state_.confidence = 1.0;
+    state_.age_frames = 1;
+    state_.coast_frames = 0;
+    state_.is_prediction = false;
+    state_.measurement_rejected_outlier = false;
+    consecutive_measurements_ = 1;
+    state_.lock_state =
+        (consecutive_measurements_ >= static_cast<std::size_t>(config_.acquire_frames_required))
+            ? LockState::Tracking
+            : LockState::Acquiring;
+    have_prior_ = true;
+}
+
 void TargetTracker::coast_or_lose(
     const double predicted_x_px, const double predicted_y_px, const bool measurement_rejected) {
     if (static_cast<int>(state_.coast_frames) >= config_.max_coast_frames) {
@@ -99,23 +119,7 @@ TrackedState TargetTracker::update(const std::optional<ImagePoint> measurement, 
     if (measurement.has_value()) {
         if (!track_active) {
             // Fresh acquisition: from Searching/Lost, or the very first call.
-            // Velocity is reset to 0 -- a stale velocity from a previous,
-            // unrelated track must never poison a new one.
-            state_.x_px = measurement->x_px;
-            state_.y_px = measurement->y_px;
-            state_.vx_px_s = 0.0;
-            state_.vy_px_s = 0.0;
-            state_.confidence = 1.0;
-            state_.age_frames = 1;
-            state_.coast_frames = 0;
-            state_.is_prediction = false;
-            state_.measurement_rejected_outlier = false;
-            consecutive_measurements_ = 1;
-            state_.lock_state = (consecutive_measurements_ >=
-                                  static_cast<std::size_t>(config_.acquire_frames_required))
-                                     ? LockState::Tracking
-                                     : LockState::Acquiring;
-            have_prior_ = true;
+            begin_acquisition(*measurement);
             return state_;
         }
 
@@ -126,6 +130,18 @@ TrackedState TargetTracker::update(const std::optional<ImagePoint> measurement, 
             // Temporal-consistency gate: implausible jump from THIS TRACKER's
             // own prediction -- treat as no measurement this frame.
             coast_or_lose(predicted_x, predicted_y, /*measurement_rejected=*/true);
+            return state_;
+        }
+
+        if (!established && jump_px > config_.outlier_gate_px) {
+            // Acquisition-consistency gate: this candidate is spatially
+            // incoherent with the acquisition already in progress (e.g.
+            // Classical false-locking onto a different random clutter blob
+            // each frame). Confirming a track on 3 consecutive but mutually
+            // inconsistent positions would be worse than not tracking at all
+            // -- restart acquisition fresh here rather than let it count
+            // toward confirmation (docs/MVP_ABLATION.md Phase E).
+            begin_acquisition(*measurement);
             return state_;
         }
 

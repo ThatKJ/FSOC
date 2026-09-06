@@ -87,6 +87,40 @@ void test_acquisition_sequence() {
     CHECK(tracker.update(pt(100, 100), kDt).lock_state == LockState::Tracking);
 }
 
+// ---- 2b. acquisition-consistency gate (P0-v2, MVP V2 Phase E): a run of
+//          spatially INCONSISTENT candidates must never confirm a track --
+//          each implausible jump restarts acquisition fresh instead of
+//          counting toward acquire_frames_required. Without this, Classical's
+//          brightest-blob rule false-locking onto a different random clutter
+//          position every frame (docs/MVP_ABLATION.md Phase E,
+//          stage4_degradation.cpp apply_clutter) would confirm a garbage
+//          track just as readily as a real, consistent one.
+
+void test_acquisition_restarts_on_spatially_inconsistent_measurements() {
+    TargetTracker tracker{TargetTrackerConfig{.acquire_frames_required = 3, .outlier_gate_px = 60.0}};
+
+    const TrackedState s1 = tracker.update(pt(50.0, 50.0), kDt);
+    CHECK(s1.lock_state == LockState::Acquiring);
+    CHECK_NEAR(s1.x_px, 50.0, 1e-6);
+
+    // > outlier_gate_px away -- must restart acquisition, not accumulate.
+    const TrackedState s2 = tracker.update(pt(500.0, 400.0), kDt);
+    CHECK(s2.lock_state == LockState::Acquiring);
+    CHECK_NEAR(s2.x_px, 500.0, 1e-6);  // snapped to the NEW measurement, not blended toward the old one
+    CHECK_NEAR(s2.vx_px_s, 0.0, 1e-9);  // velocity reset on restart, exactly like a fresh acquisition
+
+    const TrackedState s3 = tracker.update(pt(10.0, 10.0), kDt);  // inconsistent again -- restarts again
+    CHECK(s3.lock_state == LockState::Acquiring);
+    CHECK_NEAR(s3.x_px, 10.0, 1e-6);
+
+    // Three mutually CONSISTENT, closely-spaced measurements now confirm
+    // Tracking normally (the first of the three still restarts acquisition,
+    // since it is > 60 px from the last inconsistent anchor at (10,10)).
+    CHECK(tracker.update(pt(300.0, 200.0), kDt).lock_state == LockState::Acquiring);
+    CHECK(tracker.update(pt(305.0, 202.0), kDt).lock_state == LockState::Acquiring);
+    CHECK(tracker.update(pt(308.0, 199.0), kDt).lock_state == LockState::Tracking);
+}
+
 // ---- 3. stationary target: converges to the measured position, ~zero velocity ----
 
 void test_stationary_target() {
@@ -366,6 +400,7 @@ void test_is_safe_to_steer_policy() {
 int main() {
     test_first_measurement();
     test_acquisition_sequence();
+    test_acquisition_restarts_on_spatially_inconsistent_measurements();
     test_stationary_target();
     test_constant_velocity();
     test_noise_is_smoothed();
@@ -384,7 +419,7 @@ int main() {
     test_is_safe_to_steer_policy();
 
     if (failures == 0) {
-        std::cout << "PASS: 18 TargetTracker checks passed.\n";
+        std::cout << "PASS: 19 TargetTracker checks passed.\n";
         return 0;
     }
     std::cerr << "FAILED: " << failures << " check(s).\n";

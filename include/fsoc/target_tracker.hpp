@@ -65,9 +65,18 @@ struct TargetTrackerConfig {
     double alpha{0.6};
     double beta{0.3};
 
-    // Consecutive real measurements required before Acquiring -> Tracking.
-    // An unconfirmed candidate that disappears before this many frames drops
-    // straight back to Searching (never coasts an unconfirmed track).
+    // Consecutive, MUTUALLY CONSISTENT real measurements required before
+    // Acquiring -> Tracking. "Consistent" means each new measurement during
+    // Acquiring is itself checked against outlier_gate_px (same gate
+    // established tracks use): a measurement that lands far from the
+    // acquisition-in-progress restarts acquisition fresh at that new
+    // measurement rather than counting toward confirmation. Without this, 3
+    // consecutive detections at 3 spatially incoherent positions (e.g.
+    // Classical's brightest-blob rule false-locking onto a different random
+    // clutter blob every frame) would confirm a garbage track just as readily
+    // as 3 consistent ones -- see docs/MVP_ABLATION.md Phase E. An unconfirmed
+    // candidate that disappears before this many frames drops straight back
+    // to Searching (never coasts an unconfirmed track).
     int acquire_frames_required{3};
 
     // Hard coast horizon (consecutive frames without an accepted real
@@ -141,6 +150,7 @@ public:
 
 private:
     void coast_or_lose(double predicted_x_px, double predicted_y_px, bool measurement_rejected);
+    void begin_acquisition(const ImagePoint& measurement);
 
     TargetTrackerConfig config_;
     TrackedState state_{};
