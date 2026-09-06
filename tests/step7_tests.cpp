@@ -505,6 +505,115 @@ void test_tracker_two_frame_dropout_exercises_confidence_gate_in_closed_loop() {
     CHECK(results[22].detection.has_value());
 }
 
+// ---- demo disturbance seam (Phase J): bit-identical when disabled, real
+//      effect when enabled -----------------------------------------------
+
+void test_disturbance_disabled_is_bit_identical_to_baseline() {
+    const fsoc::SimulationRunnerConfig cfg_plain = fsoc::baseline_runner_config();
+
+    fsoc::SimulationRunnerConfig cfg_with_unused_disturbance = cfg_plain;
+    cfg_with_unused_disturbance.disturbance.kind = fsoc::DemoDisturbanceKind::None;
+    cfg_with_unused_disturbance.disturbance.noise_sigma = 40.0;
+    cfg_with_unused_disturbance.disturbance.distractor_peak = 255.0;
+    cfg_with_unused_disturbance.disturbance.distractor_sigma_px = 8.0;
+
+    const fsoc::StationaryTrajectory target{Vec3{100.0, 6.0, 4.0}};
+    SimulationRunner a{cfg_plain, target};
+    SimulationRunner b{cfg_with_unused_disturbance, target};
+    const auto ra = a.run_for(2.0);
+    const auto rb = b.run_for(2.0);
+
+    CHECK(ra.size() == rb.size());
+    for (std::size_t i = 0; i < ra.size(); ++i) {
+        CHECK(ra[i].detection.has_value() == rb[i].detection.has_value());
+        if (ra[i].detection.has_value() && rb[i].detection.has_value()) {
+            CHECK(ra[i].detection->centroid_px.x_px == rb[i].detection->centroid_px.x_px);
+            CHECK(ra[i].detection->centroid_px.y_px == rb[i].detection->centroid_px.y_px);
+        }
+        CHECK(ra[i].camera_pan_rad == rb[i].camera_pan_rad);
+        CHECK(ra[i].camera_tilt_rad == rb[i].camera_tilt_rad);
+    }
+}
+
+void test_disturbance_noise_is_deterministic_and_changes_the_frame() {
+    fsoc::SimulationRunnerConfig cfg = fsoc::baseline_runner_config();
+    cfg.disturbance.kind = fsoc::DemoDisturbanceKind::Noise;
+    cfg.disturbance.noise_sigma = 40.0;
+
+    const fsoc::StationaryTrajectory target{Vec3{100.0, 6.0, 4.0}};
+    SimulationRunner clean_runner{fsoc::baseline_runner_config(), target};
+    SimulationRunner noisy_a{cfg, target};
+    SimulationRunner noisy_b{cfg, target};
+
+    const auto clean = clean_runner.run_for(0.1);
+    const auto a = noisy_a.run_for(0.1);
+    const auto b = noisy_b.run_for(0.1);
+
+    bool any_pixel_differs_from_clean = false;
+    bool a_and_b_identical = true;
+    for (std::size_t i = 0; i < a.size(); ++i) {
+        CHECK(a[i].rendered_frame.size() == clean[i].rendered_frame.size());
+        if (cv::countNonZero(a[i].rendered_frame != clean[i].rendered_frame) > 0) {
+            any_pixel_differs_from_clean = true;
+        }
+        if (cv::countNonZero(a[i].rendered_frame != b[i].rendered_frame) > 0) {
+            a_and_b_identical = false;
+        }
+    }
+    CHECK(any_pixel_differs_from_clean);  // the disturbance actually changed the frame
+    CHECK(a_and_b_identical);             // same config + trajectory -> byte-identical (deterministic)
+}
+
+void test_disturbance_clutter_can_cause_false_lock() {
+    fsoc::SimulationRunnerConfig cfg = fsoc::baseline_runner_config();
+    cfg.disturbance.kind = fsoc::DemoDisturbanceKind::Clutter;
+    cfg.disturbance.distractor_peak = 255.0;
+    cfg.disturbance.distractor_sigma_px = 6.0;  // larger integrated signal than the beacon (sigma=2.0)
+
+    const fsoc::StationaryTrajectory target{Vec3{100.0, 6.0, 4.0}};
+    SimulationRunner runner{cfg, target};
+    const auto results = runner.run_for(2.0);
+
+    // A distractor with more integrated signal than the beacon must pull the
+    // classical "brightest component" centroid away from the true projection
+    // on at least one frame -- if it never did, this seam would be dead code.
+    bool saw_large_detection_error = false;
+    for (const auto& r : results) {
+        if (r.detection_error_px.has_value() && *r.detection_error_px > 20.0) {
+            saw_large_detection_error = true;
+        }
+    }
+    CHECK(saw_large_detection_error);
+}
+
+void test_disturbance_occlusion_erases_beacon_in_exact_window() {
+    fsoc::SimulationRunnerConfig cfg = fsoc::baseline_runner_config();
+    cfg.disturbance.kind = fsoc::DemoDisturbanceKind::Occlusion;
+    cfg.disturbance.occlusion_start_frame = 20;
+    cfg.disturbance.occlusion_duration_frames = 2;
+
+    const fsoc::StationaryTrajectory target{Vec3{100.0, 6.0, 4.0}};
+    SimulationRunner runner{cfg, target};
+    const auto results = runner.run_for(1.0);
+
+    CHECK(results[19].detection.has_value());
+    CHECK(!results[20].detection.has_value());  // occluded
+    CHECK(!results[21].detection.has_value());  // occluded
+    CHECK(results[22].detection.has_value());   // window closed, beacon reappears
+}
+
+void test_disturbance_invalid_config_rejected() {
+    fsoc::SimulationRunnerConfig cfg = fsoc::baseline_runner_config();
+    cfg.disturbance.kind = fsoc::DemoDisturbanceKind::Noise;
+    cfg.disturbance.noise_sigma = -1.0;
+    CHECK_THROWS_INVALID(cfg.validate());
+
+    fsoc::SimulationRunnerConfig cfg2 = fsoc::baseline_runner_config();
+    cfg2.disturbance.kind = fsoc::DemoDisturbanceKind::Clutter;
+    cfg2.disturbance.distractor_peak = 300.0;
+    CHECK_THROWS_INVALID(cfg2.validate());
+}
+
 // ---- 18 / 19. command and applied-rate limits (checked broadly) --
 
 void test_rate_limits_respected() {
@@ -709,6 +818,11 @@ int main() {
     test_tracker_disabled_is_bit_identical_to_baseline();
     test_tracker_bridges_one_frame_dropout_in_closed_loop();
     test_tracker_two_frame_dropout_exercises_confidence_gate_in_closed_loop();
+    test_disturbance_disabled_is_bit_identical_to_baseline();
+    test_disturbance_noise_is_deterministic_and_changes_the_frame();
+    test_disturbance_clutter_can_cause_false_lock();
+    test_disturbance_occlusion_erases_beacon_in_exact_window();
+    test_disturbance_invalid_config_rejected();
     test_rate_limits_respected();
     test_control_follows_detected_not_truth();
     test_manual_one_frame_trace();
@@ -717,7 +831,7 @@ int main() {
     test_prior_steps_regression();
 
     if (failures == 0) {
-        std::cout << "PASS: 17 Step-7 closed-loop checks passed.\n";
+        std::cout << "PASS: 22 Step-7 closed-loop checks passed.\n";
         return 0;
     }
     std::cerr << "FAILED: " << failures << " check(s).\n";

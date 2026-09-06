@@ -74,6 +74,7 @@ void SimulationRunnerConfig::validate() const {
                 "SimulationRunnerConfig: tracker_min_confidence_to_steer must be finite in [0, 1].");
         }
     }
+    disturbance.validate();
 }
 
 SimulationRunnerConfig baseline_runner_config() {
@@ -141,7 +142,15 @@ SimulationStepResult SimulationRunner::step() {
     result.target_visible = observation.visible();
 
     // 3. render the synthetic frame — the renderer sees ONLY the observation
-    const cv::Mat frame = renderer_.render(observation);
+    const cv::Mat clean_frame = renderer_.render(observation);
+    // 3b. demo disturbance (Phase J, additive): default None makes this an
+    // identity copy, applied AFTER the frozen renderer and BEFORE detection,
+    // so both classical and AI see the SAME disturbed frame -- never reads
+    // target/observation truth, only the already-rendered pixels. Seed is a
+    // pure function of frame_index (deterministic, reproducible).
+    const cv::Mat frame = config_.disturbance.kind == DemoDisturbanceKind::None
+                               ? clean_frame
+                               : apply_demo_disturbance(clean_frame, frame_index_, config_.disturbance);
     // Store the EXACT frame handed to the detector below (diagnostic/observer
     // only — a cheap refcounted cv::Mat copy, never read back into control).
     result.rendered_frame = frame;

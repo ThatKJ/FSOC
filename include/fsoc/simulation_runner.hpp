@@ -9,6 +9,7 @@
 #include "fsoc/ai_beacon_detector.hpp"
 #include "fsoc/camera.hpp"
 #include "fsoc/config.hpp"
+#include "fsoc/demo_disturbance.hpp"
 #include "fsoc/detector.hpp"
 #include "fsoc/geometry.hpp"
 #include "fsoc/observation.hpp"
@@ -126,15 +127,26 @@ struct SimulationRunnerConfig {
     TargetTrackerConfig tracker{};
     double tracker_min_confidence_to_steer{0.4};
 
+    // Demo disturbance seam (Phase J, additive). DEFAULT
+    // DemoDisturbanceKind::None -> bit-identical to pre-disturbance behaviour
+    // (regression-tested): apply_demo_disturbance() is never called, and
+    // result.rendered_frame is exactly renderer_.render(observation),
+    // unchanged. When non-None, the disturbance is applied to the rendered
+    // frame BEFORE detection (both classical and AI see the disturbed
+    // frame) and BEFORE it is stored in result.rendered_frame, using a seed
+    // derived deterministically from frame_index -- see
+    // include/fsoc/demo_disturbance.hpp and docs/MVP_ABLATION.md.
+    DemoDisturbanceConfig disturbance{};
+
     // Validates every sub-config, that renderer dimensions match the camera, that
     // timestep_s is finite and > 0, that each PID output limit does not exceed
     // the corresponding camera actuator rate, that initial_pan_rad/initial_tilt_rad/
     // camera_position_m are all finite, that initial_tilt_rad lies within the
     // camera's [min_tilt_rad, max_tilt_rad] (otherwise PanTiltCamera would silently
     // clamp it instead of failing), that ai_detector is present whenever
-    // perception_mode != Classical, and (iff tracker_enabled) that `tracker` and
-    // `tracker_min_confidence_to_steer` are themselves valid. Throws
-    // std::invalid_argument.
+    // perception_mode != Classical, that (iff tracker_enabled) `tracker` and
+    // `tracker_min_confidence_to_steer` are themselves valid, and that
+    // `disturbance` itself is valid. Throws std::invalid_argument.
     void validate() const;
 };
 

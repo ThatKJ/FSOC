@@ -98,7 +98,7 @@ fsoc_enable_sanitizers(step6_pid_smoke)
 # fsoc_render — synthetic image renderer (OpenCV-dependent; Step 4)
 # ---------------------------------------------------------------------------
 if(FSOC_OPENCV_AVAILABLE)
-    add_library(fsoc_render src/renderer.cpp)
+    add_library(fsoc_render src/renderer.cpp src/demo_disturbance.cpp)
     add_library(fsoc::render ALIAS fsoc_render)
     target_include_directories(fsoc_render
         PUBLIC
