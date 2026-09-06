@@ -8,7 +8,7 @@ This repository treats the challenge as a **closed-loop guidance, tracking, and 
 
 ## Language decision
 
-The project baseline is now **modern C++20**. There is no Python package, virtual environment, pip install, `pyproject.toml`, NumPy, or PyVista dependency in the core project.
+The project baseline is now **modern C++20**. There is no Python package, virtual environment, pip install, `pyproject.toml`, NumPy, or PyVista dependency in the core project — i.e. in the **runtime control loop**. `tools/ai/` is a separate, offline, one-time model-training toolchain (PyTorch → ONNX export, `tools/ai/README.md`) that produces the committed `models/tiny_beacon_net.onnx`; it is never imported, run, or required by the C++ runtime, which loads that ONNX file through OpenCV-DNN (see "AI Perception" below).
 
 For the first 48-hour MVP:
 - Core math/physics/control: C++20
@@ -239,6 +239,41 @@ For the first 48-hour MVP:
   + the static & sinusoidal demos + the Step-9 visualization evidence. See
   `docs/17_DEMO_FREEZE.md` for the teammate-Mac checklist.
 
+## AI Perception (V2) implemented — real trained model, real C++ inference, safety-gated
+
+Additive, post-`v1_baseline` work on `feat/ai-perception`. The frozen classical
+baseline above is **unchanged** by any of this — see `docs/19_AI_PERCEPTION_ARCHITECTURE.md`
+and ADR-015/016/017/018 in `DECISIONS.md` for the full design history.
+
+- **A real trained model, not a stub.** `TinyBeaconNet` (27,282 parameters, a small
+  fully-convolutional heatmap network — not a downloaded/pretrained backbone) is trained
+  on a deterministic, seeded synthetic dataset (`fsoc_ai_datagen`, domain-randomized
+  noise/blur/clutter/distractors), exported to ONNX (opset 12), and loaded natively in
+  C++ via OpenCV-DNN (`AiBeaconDetector`, `include/fsoc/ai_beacon_detector.hpp`). No
+  Python is in the runtime path. Python↔ONNX Runtime↔C++ numeric parity is measured, not
+  assumed: centroid agreement is **1.54e-7 px** on this machine (`fsoc_ai_beacon_detector_tests`).
+- **Safe Hybrid fusion (ADR-018), not a naive confidence blend.** `resolve_perception()`
+  implements a frozen decision table: classical+AI agreement (≤8.0 px) accepts the
+  classical centroid; classical-only accepts classical; **AI-only and any classical/AI
+  disagreement both reject unconditionally** — no confidence override, no averaging,
+  no "trust whichever is brighter." Stage-2 evidence (`DECISIONS.md` ADR-018) showed AI
+  confidence does not separate correct from wrong detections, so a lone high-confidence
+  AI candidate is deliberately never trusted alone.
+- **Measured, unflattering-where-true evaluation**, not marketing numbers.
+  `stage4_evaluation` (`docs/21_AI_STAGE4_EVALUATION_PROTOCOL.md`) scores Classical vs.
+  AI vs. Hybrid across 11 deterministic degraded scenarios. Headline finding: Hybrid
+  reduces severe closed-loop wrong-lock outliers by ~20% vs. Classical alone, but does
+  **not** fix Classical's own bright-clutter false-lock vulnerability (44.9% aggregate
+  false-positive rate) — full numbers and the caveats discovered while producing them
+  are in `docs/MVP_METRICS.md`.
+- **Reachable from the actual demo, not just from unit tests.**
+  `fsoc_demo <scenario> --mode classical|ai|hybrid` runs the same validated closed loop
+  with AI/Hybrid perception live; falls back to classical with a visible warning if the
+  ONNX model can't be loaded (Phase-7-style failure handling, not a crash). The 27-column
+  Step-8 telemetry CSV gained 7 additive perception columns (34 total, header-driven —
+  old readers are unaffected); Mission Control's telemetry rail shows the live
+  mode/source/AI-confidence/rejection-reason.
+
 ## macOS quick start
 
 ```bash
@@ -260,25 +295,62 @@ ctest --preset debug
 ./build/debug/step9_visualization_smoke  # writes generated/step9/*.png (+ optional .mp4)
 ./build/debug/step10_validation_smoke    # baseline acceptance; writes generated/step10/
 ./build/debug/fsoc_demo sinusoidal       # demo runner: static|sinusoidal|loss|open|closed
+./build/debug/fsoc_demo static --mode hybrid   # same demo, live AI + Safe Hybrid perception
 make demo                                # reproducible: validation + demos + visualization
+
+# AI perception (requires the committed models/tiny_beacon_net.onnx, already in the repo)
+./build/debug/ai_inference_benchmark             # C++ ONNX inference latency, this machine
+cmake --preset release && cmake --build --preset release
+./build/release/stage4_evaluation --out generated/ai_stage4   # full frozen-protocol eval, ~10-15 min
+
+# Mission Control frontend (Next.js; reads real fsoc_demo CSV output, never fakes telemetry)
+cd frontend && npm install
+npm run dev          # http://localhost:4317 — toggle ENGINE (live fsoc_demo) / REPLAY (checked-in fixture)
+npm run typecheck && npm run lint && npm run build
+npx playwright test  # end-to-end smoke suite, incl. a no-Math.random anti-fake-data guard
 ```
 
 Steps 1–3 build and pass without OpenCV; if `opencv` is missing, CMake prints a notice
 and skips the Step 4 renderer target only. Install it with `brew install opencv` and
 reconfigure — no Homebrew paths are hardcoded.
 
+## Simulation vs. real hardware, and current limitations
+
+Everything in this repository — every metric, every demo, every frontend view — runs
+against the deterministic C++ **simulation** (`SyntheticCameraRenderer` draws an analytic
+Gaussian beacon; there is no physical camera, beacon, or pan/tilt mechanism anywhere in
+this codebase). Mission Control's `ENGINE`/`REPLAY` toggle distinguishes "the real
+simulation binary, run live" from "a checked-in deterministic recording of that same
+binary" — neither is a physical test bench. See `docs/MVP_METRICS.md` §5 for the full
+"not measured / not claimed" list.
+
+The architecture is deliberately layered so `FrameSource` / `Detector` / `Controller` /
+`PanTiltCamera` are independently swappable (`docs/09_FUTURE_ARCHITECTURE.md`): the next
+hardware step is replacing `SyntheticCameraRenderer` with a real frame grabber and
+`PanTiltCamera::step()`'s actuator model with a real servo/motor driver, without touching
+the detector, PID, or `SimulationRunner` step order. Known MVP-stage limitations: AI
+recall is intentionally low (~16-40% depending on scenario) rather than over-confident;
+Safe Hybrid does not yet correct Classical's own bright-clutter false-lock behavior
+(`docs/MVP_METRICS.md` §2); there is no motion-prediction/state-estimation filter beyond
+the frozen P-only PID (kp=12, ki=0, kd=0) — a deliberate, documented, currently-sufficient
+choice (`docs/16_BASELINE_ACCEPTANCE.md`), not an oversight.
+
 ## Repository layout
 
 ```text
 include/fsoc/       Public interfaces
 src/                Core implementations
-apps/               Executable simulation/demo programs
-tests/              Mathematical/unit validation
+apps/               Executable simulation/demo/benchmark/evaluation programs
+tests/              Mathematical/unit validation (CTest)
+models/             Committed trained ONNX model + metadata (models/MODEL_CARD.md)
+tools/ai/           Offline Python training toolchain (NOT part of the C++ runtime)
+frontend/           Next.js Mission Control UI (reads real fsoc_demo telemetry)
 cmake/              Build policies
 .claude/skills/     Claude Code engineering skills
 .claude/agents/     Specialist subagents
-docs/               PRD/SRS/design/roadmap/test plans
+docs/               PRD/SRS/design/roadmap/test plans/AI architecture/measured metrics
 prompts/             Reusable Vibe Coding prompts
+generated/           Git-ignored run artifacts (CSV/PNG/JSON reports) — never committed
 ```
 
 Read `CLAUDE.md` before asking an AI coding agent to modify the project.
