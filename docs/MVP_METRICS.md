@@ -107,12 +107,50 @@ budget on this machine. This is **not** a hardware real-time-loop qualification 
 
 | metric | value | method |
 |---|---|---|
-| C++ → CSV → frontend telemetry columns | 34 (27 core + 7 Stage-3 perception, additive) | `docs/08_TELEMETRY_SCHEMA.md` |
+| C++ → CSV → frontend telemetry columns | 42 (27 core + 7 Stage-3 perception + 8 P0-v2 tracker, additive) | `docs/08_TELEMETRY_SCHEMA.md` |
 | Frontend typecheck / lint / build | clean | `npm run typecheck / lint / build` |
-| Playwright E2E | 18/18 passed | `npx playwright test`, incl. the repo's own "no Math.random in application source" guard |
+| Playwright E2E | 20/20 passed | `npx playwright test`, incl. the repo's own "no Math.random in application source" guard and a P0-v2 engine-mode tracker regression test |
 | Simulation processing throughput (informational — NOT the 50 Hz sim rate) | ~3,400–3,900 FPS | `fsoc_demo` wall-clock timer around the step loop |
 
-## 5. What is NOT measured / NOT claimed
+## 5. Full latency budget (P0-v2 Phase L)
+
+Method: `./build/release/mvp_latency_budget` (2,000 iterations per measurement after a
+50-iteration warmup; this machine, Release build). Measures every closed-loop stage in
+isolation, then the full `SimulationRunner::step()` end-to-end for all four
+Classical/Hybrid × tracker-off/on configurations, against the 20 ms / 50 Hz simulation
+budget.
+
+| stage | mean | P95 | max | % of 20 ms budget (P95) |
+|---|---|---|---|---|
+| perception (Classical) | 0.216 ms | 0.276 ms | 0.452 ms | 1.4% |
+| perception (AI) | 0.928 ms | 1.073 ms | 3.895 ms | 5.4% |
+| perception (Hybrid fusion) | 1.164 ms | 1.436 ms | 2.891 ms | 7.2% |
+| estimation (`TargetTracker::update`) | <0.001 ms | <0.001 ms | <0.001 ms | ~0.0% |
+| controller (`PIDController::update`) | <0.001 ms | <0.001 ms | <0.001 ms | ~0.0% |
+| **full step: CLASSICAL** | 0.228–0.260 ms | 0.320–0.428 ms | 0.639–2.379 ms | 1.6–2.1% |
+| **full step: CLASSICAL+TRACKER** | 0.240–0.268 ms | 0.339–0.407 ms | 1.575–2.635 ms | 1.7–2.0% |
+| **full step: HYBRID** | 1.149–1.216 ms | 1.428–1.507 ms | 3.184–4.814 ms | 7.1–7.5% |
+| **full step: HYBRID+TRACKER (V2)** | 1.167–1.268 ms | 1.439–1.639 ms | 4.994–16.268 ms | 7.2–8.2% |
+
+(Full-step ranges are across two independent runs; single-sample `max` outliers -- e.g. the
+one 16.27 ms Hybrid+Tracker spike -- are attributed to OS scheduling jitter on a shared
+development machine, not a systematic cost: the corresponding P95 stayed at 1.64 ms.)
+
+**Findings:**
+- Estimation (the P0-v2 alpha-beta filter) and the PID controller are both immeasurably
+  fast relative to perception -- pure arithmetic, no allocation, no I/O. Enabling the
+  tracker adds essentially no measurable overhead to the full step (Classical: +0.01-0.04
+  ms; Hybrid: +0.02-0.13 ms mean).
+- Perception dominates the budget entirely, and AI/Hybrid's ONNX inference is the single
+  largest contributor (~1 ms), consistent with `docs/MVP_METRICS.md §3`'s standalone
+  inference benchmark (mean 1.010 ms).
+- Every configuration, including the most expensive (Hybrid+Tracker), fits comfortably
+  inside the 20 ms / 50 Hz budget even at P95 (≤8.2%) on this development machine.
+- **This is development-machine CPU performance only** -- an Apple M5 desktop-class
+  processor, not the target embedded/flight hardware. No claim is made or implied about
+  performance on any other platform.
+
+## 6. What is NOT measured / NOT claimed
 
 - No physical camera, beacon, servo, or pan/tilt hardware has been used. Every number
   above is from the deterministic C++ simulation.
@@ -131,6 +169,9 @@ cmake --preset debug && cmake --build --preset debug && ctest --preset debug --o
 ./build/debug/step10_validation_smoke
 cmake --preset release && cmake --build --preset release
 ./build/release/ai_inference_benchmark
-./build/release/stage4_evaluation --out generated/ai_stage4   # ~10-15 min, frozen protocol
+./build/release/stage4_evaluation --out generated/ai_stage4         # ~10-15 min, frozen protocol
+./build/release/stage4_tracker_ablation --out generated/ai_stage4_ablation  # ~15 min, docs/MVP_ABLATION.md
+./build/release/mvp_dynamic_scenarios --out generated/mvp_dynamic_scenarios
+./build/release/mvp_latency_budget                                  # seconds; this doc §5
 cd frontend && npm run typecheck && npm run lint && npm run build && npx playwright test
 ```

@@ -361,6 +361,11 @@ if(FSOC_OPENCV_AVAILABLE)
     target_link_libraries(mvp_dynamic_scenarios PRIVATE fsoc::stage4_eval)
     fsoc_set_project_warnings(mvp_dynamic_scenarios)
     fsoc_enable_sanitizers(mvp_dynamic_scenarios)
+
+    add_executable(mvp_latency_budget apps/mvp_latency_budget.cpp)
+    target_link_libraries(mvp_latency_budget PRIVATE fsoc::demo_support)
+    fsoc_set_project_warnings(mvp_latency_budget)
+    fsoc_enable_sanitizers(mvp_latency_budget)
 endif()
 
 if(FSOC_BUILD_TESTS)
