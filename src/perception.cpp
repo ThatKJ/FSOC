@@ -14,6 +14,34 @@ namespace {
 
 }  // namespace
 
+std::string_view to_string(const PerceptionMode mode) noexcept {
+    switch (mode) {
+        case PerceptionMode::Classical: return "CLASSICAL";
+        case PerceptionMode::AI: return "AI";
+        case PerceptionMode::Hybrid: return "HYBRID";
+    }
+    return "CLASSICAL";
+}
+
+std::string_view to_string(const PerceptionSource source) noexcept {
+    switch (source) {
+        case PerceptionSource::None: return "NONE";
+        case PerceptionSource::Classical: return "CLASSICAL";
+        case PerceptionSource::AI: return "AI";
+        case PerceptionSource::HybridAgreement: return "HYBRID_AGREEMENT";
+    }
+    return "NONE";
+}
+
+std::string_view to_string(const PerceptionRejectionReason reason) noexcept {
+    switch (reason) {
+        case PerceptionRejectionReason::NotApplicable: return "NOT_APPLICABLE";
+        case PerceptionRejectionReason::AiOnlyUnverified: return "AI_ONLY_UNVERIFIED";
+        case PerceptionRejectionReason::DetectorDisagreement: return "DETECTOR_DISAGREEMENT";
+    }
+    return "NOT_APPLICABLE";
+}
+
 PerceptionResult resolve_perception(
     const PerceptionMode mode,
     const std::optional<BeaconDetection>& classical_detection,

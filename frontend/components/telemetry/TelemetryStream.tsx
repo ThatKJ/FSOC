@@ -68,6 +68,32 @@ export function TelemetryStream({ className }: { className?: string }) {
           />
         </div>
 
+        {current.perception && (
+          <div className="flex flex-col gap-margin-sm bg-surface-container-low p-margin-md">
+            <span className="mb-unit font-label-xs text-label-xs text-on-surface-variant">
+              PERCEPTION (STAGE 3)
+            </span>
+            <KeyValueRow k="MODE" v={current.perception.mode} />
+            <KeyValueRow
+              k="SOURCE"
+              v={current.perception.source}
+              tone={current.perception.source === "NONE" ? "lost" : "primary"}
+            />
+            <KeyValueRow
+              k="AI CONF"
+              border={current.perception.rejectionReason === "NOT_APPLICABLE"}
+              v={
+                current.perception.aiPresenceProbability != null
+                  ? fixed(current.perception.aiPresenceProbability, 3)
+                  : "—"
+              }
+            />
+            {current.perception.rejectionReason !== "NOT_APPLICABLE" && (
+              <KeyValueRow k="REJECTED" v={current.perception.rejectionReason} tone="warning" border={false} />
+            )}
+          </div>
+        )}
+
         <div className="flex flex-col gap-margin-sm bg-surface-container-low p-margin-md">
           <span className="mb-unit font-label-xs text-label-xs text-on-surface-variant">TARGET (TRUTH)</span>
           <KeyValueRow k="X / Y / Z [m]" v={`${fixed(current.target.position.x, 1)} / ${fixed(current.target.position.y, 1)} / ${fixed(current.target.position.z, 1)}`} />

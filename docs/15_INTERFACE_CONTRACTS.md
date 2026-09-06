@@ -306,7 +306,7 @@ Layers stay distinct — do not alias them:
   `AcceptanceCheck` and, separately, tightens a real threshold past its measured value, and
   asserts `evaluate_passed()` and `ValidationSuiteResult::overall_passed` both become
   `false`. Step 10 is not a decorative always-green harness.
-- **Evidence.** Per-scenario 27-column `TelemetryRecord` CSV via `CsvTelemetryLogger`;
+- **Evidence.** Per-scenario 34-column `TelemetryRecord` CSV (27 core + 7 Stage-3 perception fields) via `CsvTelemetryLogger`;
   annotated PNGs via the Step-9 observer path only —
   `SyntheticCameraRenderer{config.renderer}.render(result.observation)` for the base frame,
   then `TrackingVisualizer::annotate()` — no drawing code is re-implemented.

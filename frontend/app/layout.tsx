@@ -13,7 +13,7 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "IRODOV // FSOC ALIGNMENT — SIH26169",
+  title: "FSOC ALIGNMENT — SIH26169",
   description:
     "Mission-control frontend for the SIH26169 virtual camera tracking engine. Observer / presentation layer over the frozen v1_baseline C++ engine.",
 };

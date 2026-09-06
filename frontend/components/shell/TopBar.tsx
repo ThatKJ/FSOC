@@ -21,7 +21,7 @@ export function TopBar() {
     <header className="fixed left-0 right-0 top-0 z-50 flex h-[48px] items-center justify-between border-b border-outline-variant bg-surface-container-lowest px-margin-md">
       <div className="flex items-baseline gap-margin-md">
         <span className="font-display-telem text-headline-sm tracking-widest text-on-surface">
-          IRODOV // FSOC ALIGNMENT
+          FSOC ALIGNMENT
         </span>
         <span className="border-l border-outline-variant pl-margin-md font-label-xs text-label-xs uppercase tracking-tight text-on-surface-variant">
           SIH26169

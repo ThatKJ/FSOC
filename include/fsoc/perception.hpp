@@ -1,6 +1,7 @@
 #pragma once
 
 #include <optional>
+#include <string_view>
 
 #include "fsoc/ai_beacon_detector.hpp"
 #include "fsoc/measurement.hpp"
@@ -29,6 +30,12 @@ enum class PerceptionSource { None, Classical, AI, HybridAgreement };
 // DIAGNOSTIC ONLY — meaningful iff the control-facing result is std::nullopt
 // under PerceptionMode::Hybrid.
 enum class PerceptionRejectionReason { NotApplicable, AiOnlyUnverified, DetectorDisagreement };
+
+// Canonical SCREAMING_SNAKE names for telemetry / CSV / the frontend contract
+// (matches DemoTrackingState::to_string()'s convention). Never used for control logic.
+[[nodiscard]] std::string_view to_string(PerceptionMode mode) noexcept;
+[[nodiscard]] std::string_view to_string(PerceptionSource source) noexcept;
+[[nodiscard]] std::string_view to_string(PerceptionRejectionReason reason) noexcept;
 
 // Frozen (ADR-018): the source-space size of one TinyBeaconNet heatmap cell
 // (INPUT_STRIDE = 8; 640/80 = 480/60 = 8). This is an engineering geometry

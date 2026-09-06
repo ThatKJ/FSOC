@@ -219,6 +219,13 @@ public:
     // Demo knob: override the scenario's validated duration (still fixed 50 Hz).
     // Throws std::invalid_argument if duration_s is not finite and > 0.
     DemoSession(DemoScenario scenario, double duration_s);
+    // Additive (Stage 3): same as above, with the perception seam overridden.
+    // `mode == PerceptionMode::Classical` is bit-identical to the constructor
+    // above. `ai_detector` is required (throws std::invalid_argument via
+    // SimulationRunnerConfig::validate()) whenever mode != Classical.
+    DemoSession(
+        DemoScenario scenario, double duration_s, PerceptionMode mode,
+        std::optional<AiBeaconDetectorConfig> ai_detector = std::nullopt);
 
     DemoSession(const DemoSession&) = delete;
     DemoSession& operator=(const DemoSession&) = delete;

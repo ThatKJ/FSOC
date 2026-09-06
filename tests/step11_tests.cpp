@@ -9,18 +9,25 @@
 #include <cmath>
 #include <cstddef>
 #include <iostream>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <vector>
 
+#include "fsoc/ai_beacon_detector.hpp"
 #include "fsoc/camera.hpp"
 #include "fsoc/config.hpp"
 #include "fsoc/demo.hpp"
 #include "fsoc/geometry.hpp"
+#include "fsoc/perception.hpp"
 #include "fsoc/simulation_runner.hpp"
 #include "fsoc/telemetry.hpp"
 #include "fsoc/trajectory.hpp"
 #include "fsoc/validation.hpp"
+
+#ifndef FSOC_PROJECT_SOURCE_DIR
+#error "FSOC_PROJECT_SOURCE_DIR must be defined by CMakeLists.txt"
+#endif
 
 namespace {
 
@@ -634,6 +641,70 @@ void test_non_interference() {
     }
 }
 
+// ---- Stage-3 perception-mode-aware DemoSession constructor (additive) ----
+
+// PerceptionMode::Classical through the new 4-arg constructor must be
+// bit-identical to the existing 2-arg constructor -- the additive overload
+// changes nothing about the frozen default demo path.
+void test_perception_aware_constructor_classical_matches_default() {
+    for (const DemoScenario scenario : fsoc::all_demo_scenarios()) {
+        const double duration = 1.0;  // short, deterministic
+        DemoSession baseline{scenario, duration};
+        DemoSession explicit_classical{scenario, duration, fsoc::PerceptionMode::Classical};
+
+        bool identical = true;
+        while (!baseline.finished() && !explicit_classical.finished() && identical) {
+            (void)baseline.step();
+            (void)explicit_classical.step();
+            identical = step_results_equal(baseline.last_step_result(), explicit_classical.last_step_result());
+        }
+        CHECK(identical);
+        CHECK(baseline.finished() == explicit_classical.finished());
+    }
+}
+
+// PerceptionMode::Hybrid must be REQUIRED to supply an ai_detector config
+// (SimulationRunnerConfig::validate() enforces this, Stage 3) -- the demo
+// constructor does not weaken that.
+void test_perception_aware_constructor_requires_ai_detector_for_hybrid() {
+    bool threw = false;
+    try {
+        DemoSession session{DemoScenario::StaticAcquisition, 1.0, fsoc::PerceptionMode::Hybrid};
+        (void)session;
+    } catch (const std::invalid_argument&) {
+        threw = true;
+    } catch (...) {
+    }
+    CHECK(threw);
+}
+
+// Hybrid mode, given a valid model config, runs end-to-end and produces real
+// (not default-constructed) perception telemetry.
+void test_perception_aware_constructor_hybrid_runs_end_to_end() {
+    fsoc::AiBeaconDetectorConfig ai_config{};
+    ai_config.model_path = std::string(FSOC_PROJECT_SOURCE_DIR) + "/models/tiny_beacon_net.onnx";
+    ai_config.presence_threshold = 0.95;
+
+    DemoSession session{DemoScenario::StaticAcquisition, 1.0, fsoc::PerceptionMode::Hybrid, ai_config};
+    bool saw_hybrid_mode = false;
+    bool saw_any_ai_candidate = false;
+    while (!session.finished()) {
+        (void)session.step();
+        const fsoc::TelemetryRecord& t = session.last_telemetry();
+        if (t.perception_mode == "HYBRID") {
+            saw_hybrid_mode = true;
+        }
+        if (t.ai_candidate_detected) {
+            saw_any_ai_candidate = true;
+            CHECK(t.ai_presence_probability.has_value());
+            CHECK(*t.ai_presence_probability >= 0.95);
+            CHECK(t.ai_inference_ms.has_value());
+        }
+    }
+    CHECK(saw_hybrid_mode);
+    CHECK(saw_any_ai_candidate);  // this scenario's beacon is clean/bright -> AI should fire at least once
+}
+
 }  // namespace
 
 int main() {
@@ -660,9 +731,12 @@ int main() {
     test_prior_steps_regression();
     test_pause_and_run_state();
     test_non_interference();
+    test_perception_aware_constructor_classical_matches_default();
+    test_perception_aware_constructor_requires_ai_detector_for_hybrid();
+    test_perception_aware_constructor_hybrid_runs_end_to_end();
 
     if (failures == 0) {
-        std::cout << "PASS: 23 Step-11 demo-packaging checks passed.\n";
+        std::cout << "PASS: 26 Step-11 demo-packaging checks passed.\n";
         return 0;
     }
     std::cerr << "FAILED: " << failures << " check(s).\n";

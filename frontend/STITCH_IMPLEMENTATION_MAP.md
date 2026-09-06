@@ -15,7 +15,7 @@ output (LOCAL ENGINE MODE) or its checked-in deterministic replay (REPLAY MODE).
 
 | Stitch element | Component | Notes |
 |---|---|---|
-| fixed header `h-[48px]` | `components/shell/TopBar.tsx` | IRODOV title + SIH26169 badge; centre scenario pill; SIM clock; Uplink indicator; avatar |
+| fixed header `h-[48px]` | `components/shell/TopBar.tsx` | FSOC title + SIH26169 badge; centre scenario pill; SIM clock; Uplink indicator; avatar |
 | scenario pill (centre) | `components/shell/ScenarioMenu.tsx` | **functional** — click to switch the active `DemoScenario` |
 | left rail `w-[64px]` | `components/shell/NavRail.tsx` | 9 icon links, active = `text-primary border-r-2 border-primary`, `usePathname()` |
 | `<main pl-[64px] pt-[48px]>` | `components/shell/AppShell.tsx` | |

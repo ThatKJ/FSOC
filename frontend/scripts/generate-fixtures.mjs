@@ -80,7 +80,12 @@ function csvToSnapshots(text) {
     apr: col("applied_pan_rate_rad_s"), atr: col("applied_tilt_rate_rad_s"),
     psat: col("pan_saturated"), tsat: col("tilt_saturated"),
     derr: col("detection_error_px"), st: col("tracking_state"),
+    pmode: col("perception_mode"), psrc: col("perception_source"),
+    aicand: col("ai_candidate_detected"), aiprob: col("ai_presence_probability"),
+    aims: col("ai_inference_ms"), caidist: col("classical_ai_distance_px"),
+    prej: col("perception_rejection_reason"),
   };
+  const hasPerceptionColumns = c.pmode >= 0;
   const rows = lines.slice(1).filter((l) => l.length > 0).map((l) => l.split(","));
   return rows.map((r) => {
     const stateRaw = String(r[c.st] ?? "").trim();
@@ -116,6 +121,17 @@ function csvToSnapshots(text) {
       },
       detectionErrorPx: optNum(r[c.derr]),
       targetVisible: bool01(r[c.vis]),
+      perception: hasPerceptionColumns
+        ? {
+            mode: String(r[c.pmode] ?? "CLASSICAL").trim() || "CLASSICAL",
+            source: String(r[c.psrc] ?? "NONE").trim() || "NONE",
+            aiCandidateDetected: bool01(r[c.aicand]),
+            aiPresenceProbability: optNum(r[c.aiprob]),
+            aiInferenceMs: optNum(r[c.aims]),
+            classicalAiDistancePx: optNum(r[c.caidist]),
+            rejectionReason: String(r[c.prej] ?? "NOT_APPLICABLE").trim() || "NOT_APPLICABLE",
+          }
+        : undefined,
     };
   });
 }

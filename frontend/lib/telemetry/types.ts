@@ -65,6 +65,22 @@ export interface DemoSnapshot {
   detectionErrorPx?: number | null;
   /** TRUTH visibility flag (target inside the FOV) — diagnostic */
   targetVisible?: boolean;
+
+  /**
+   * DIAGNOSTIC ONLY — Stage-3 AI + Safe Hybrid perception (ADR-018). Optional:
+   * absent when reading an older fixture recorded before these CSV columns
+   * existed. `mode` is "CLASSICAL" for every run that doesn't pass --mode to
+   * fsoc_demo. Never used to recompute tracking/control — display only.
+   */
+  perception?: {
+    mode: "CLASSICAL" | "AI" | "HYBRID";
+    source: "NONE" | "CLASSICAL" | "AI" | "HYBRID_AGREEMENT";
+    aiCandidateDetected: boolean;
+    aiPresenceProbability: number | null;
+    aiInferenceMs: number | null;
+    classicalAiDistancePx: number | null;
+    rejectionReason: "NOT_APPLICABLE" | "AI_ONLY_UNVERIFIED" | "DETECTOR_DISAGREEMENT";
+  };
 }
 
 export interface SimulationMeta {

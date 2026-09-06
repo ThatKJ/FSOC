@@ -46,6 +46,20 @@ trajectory. Running a simulation with or without telemetry yields a bit-identica
 | 25 | `tilt_saturated` | bool | — | tilt axis at the actuator rate limit this frame | always |
 | 26 | `detection_error_px` | optional double | px | DIAGNOSTIC: `‖detected centroid − exact projection‖` (truth used only here) | present iff both a detection and a `Visible` projection exist |
 | 27 | `tracking_state` | enum string | — | `Tracking` (a `TrackingError` was produced) or `TargetLost` (no detection) | always |
+| 28 | `perception_mode` | enum string | — | `CLASSICAL` \| `AI` \| `HYBRID` — which `fsoc::PerceptionMode` this run used (Stage 3, ADR-018) | always (constant per run) |
+| 29 | `perception_source` | enum string | — | `NONE` \| `CLASSICAL` \| `AI` \| `HYBRID_AGREEMENT` — which candidate produced the control-facing detection this frame | always |
+| 30 | `ai_candidate_detected` | bool | — | the AI detector produced a threshold-accepted candidate this frame (`presence_probability >= 0.95`) | always |
+| 31 | `ai_presence_probability` | optional double | — | `sigmoid(presence_logit)` of the AI candidate | present iff `ai_candidate_detected` |
+| 32 | `ai_inference_ms` | optional double | ms | AI detector preprocess+forward+decode wall time | present iff `ai_candidate_detected` |
+| 33 | `classical_ai_distance_px` | optional double | px | `‖classical centroid − AI centroid‖`, used against the frozen 8.0 px `agreement_radius_px` | present iff both classical and AI produced a candidate this frame |
+| 34 | `perception_rejection_reason` | enum string | — | `NOT_APPLICABLE` \| `AI_ONLY_UNVERIFIED` \| `DETECTOR_DISAGREEMENT` — meaningful iff `tracking_state == TargetLost` under `HYBRID` (ADR-018) | always |
+
+Fields 28-34 are additive (Stage 3, `feat/ai-perception`) and DIAGNOSTIC ONLY — the
+PID never reads them. For every pre-Stage-3 run (and every run using the default
+`PerceptionMode::Classical`), `perception_mode` is the constant string `CLASSICAL` and
+`perception_source` mirrors `tracking_state` exactly (`CLASSICAL` iff `Tracking`, `NONE`
+iff `TargetLost`) — a reader that ignores columns 28-34 sees the exact same 27-column
+schema as before.
 
 ## Tracking state
 
@@ -57,10 +71,11 @@ carried by `pan_saturated` / `tilt_saturated`. An `Acquiring` state would be dec
 
 * Written by `fsoc::CsvTelemetryLogger` — synchronous `std::ofstream`, one line per record,
   flushed after every line. No threads, no async queue, no external CSV dependency.
-* Header line = the 27 column names above, comma-separated, in order.
+* Header line = the 34 column names above, comma-separated, in order.
   `CsvTelemetryLogger::column_names()` is the single source of that order (also the stable
-  JSON key list for a future frontend).
-* Every record line has exactly 27 comma-separated fields (empty fields count).
+  JSON key list for the frontend — `frontend/lib/telemetry/normalize.ts` parses by header
+  name, so it is unaffected by columns appended after it last read the file).
+* Every record line has exactly 34 comma-separated fields (empty fields count).
 * Logs are written to `generated/` (git-ignored); binary/CSV logs are never committed.
 
 ## Benchmark metrics — denominator conventions

@@ -74,6 +74,14 @@ TelemetryRecord make_telemetry_record(
     record.tracking_state =
         result.tracking_error.has_value() ? TrackingState::Tracking : TrackingState::TargetLost;
 
+    record.perception_mode = std::string(to_string(result.perception.perception_mode));
+    record.perception_source = std::string(to_string(result.perception.perception_source));
+    record.ai_candidate_detected = result.perception.ai_candidate_detected;
+    record.ai_presence_probability = result.perception.ai_presence_probability;
+    record.ai_inference_ms = result.perception.ai_inference_ms;
+    record.classical_ai_distance_px = result.perception.classical_ai_distance_px;
+    record.perception_rejection_reason = std::string(to_string(result.perception.rejection_reason));
+
     return record;
 }
 
@@ -110,6 +118,13 @@ const std::vector<std::string>& CsvTelemetryLogger::column_names() {
         "tilt_saturated",
         "detection_error_px",
         "tracking_state",
+        "perception_mode",
+        "perception_source",
+        "ai_candidate_detected",
+        "ai_presence_probability",
+        "ai_inference_ms",
+        "classical_ai_distance_px",
+        "perception_rejection_reason",
     };
     return columns;
 }
@@ -178,7 +193,14 @@ void CsvTelemetryLogger::record(const TelemetryRecord& rec) {
          << rec.applied_pan_rate_rad_s << ',' << rec.applied_tilt_rate_rad_s << ','
          << (rec.pan_saturated ? 1 : 0) << ',' << (rec.tilt_saturated ? 1 : 0) << ',';
     put_optional(out_, rec.detection_error_px);
-    out_ << ',' << to_string(rec.tracking_state) << '\n';
+    out_ << ',' << to_string(rec.tracking_state) << ',' << rec.perception_mode << ','
+         << rec.perception_source << ',' << (rec.ai_candidate_detected ? 1 : 0) << ',';
+    put_optional(out_, rec.ai_presence_probability);
+    out_ << ',';
+    put_optional(out_, rec.ai_inference_ms);
+    out_ << ',';
+    put_optional(out_, rec.classical_ai_distance_px);
+    out_ << ',' << rec.perception_rejection_reason << '\n';
     out_.flush();  // synchronous: the file is always current on disk
 
     ++records_written_;

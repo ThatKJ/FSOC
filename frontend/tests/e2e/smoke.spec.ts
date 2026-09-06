@@ -47,7 +47,7 @@ test.describe("routes load", () => {
     test(`${r.label} (${r.path}) renders without crashing`, async ({ page }) => {
       const getErrors = await noConsoleErrors(page);
       await page.goto(r.path, { waitUntil: "networkidle" });
-      await expect(page.locator("header")).toContainText("IRODOV // FSOC ALIGNMENT");
+      await expect(page.locator("header")).toContainText("FSOC ALIGNMENT");
       await expect(page.locator("nav a")).toHaveCount(9);
       // the shell must not be blank
       await expect(page.locator("main")).toBeVisible();

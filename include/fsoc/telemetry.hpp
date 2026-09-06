@@ -90,6 +90,19 @@ struct TelemetryRecord {
     std::optional<double> detection_error_px{};
 
     TrackingState tracking_state{TrackingState::TargetLost};
+
+    // --- Perception diagnostics (Stage 3/4 AI + Safe Hybrid, additive) ---
+    // Mirrors fsoc::PerceptionDiagnostics on SimulationStepResult (see
+    // fsoc/perception.hpp, ADR-018). Always present; DIAGNOSTIC ONLY — never
+    // fed back into the controller. `perception_mode` is CLASSICAL for every
+    // pre-Stage-3 run, so old readers of this schema see a constant column.
+    std::string perception_mode{"CLASSICAL"};              // CLASSICAL | AI | HYBRID
+    std::string perception_source{"NONE"};                 // NONE | CLASSICAL | AI | HYBRID_AGREEMENT
+    bool ai_candidate_detected{false};
+    std::optional<double> ai_presence_probability{};        // sigmoid(presence_logit), present iff a candidate exists
+    std::optional<double> ai_inference_ms{};                 // present iff a candidate exists
+    std::optional<double> classical_ai_distance_px{};        // present iff both classical and AI produced a candidate
+    std::string perception_rejection_reason{"NOT_APPLICABLE"};  // meaningful iff tracking_state == TargetLost under Hybrid
 };
 
 // Tolerance for the saturation flags (rad/s).
