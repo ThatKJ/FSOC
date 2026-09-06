@@ -316,6 +316,40 @@ if(FSOC_OPENCV_AVAILABLE)
     target_link_libraries(ai_inference_benchmark PRIVATE fsoc::ai_perception fsoc::render)
     fsoc_set_project_warnings(ai_inference_benchmark)
     fsoc_enable_sanitizers(ai_inference_benchmark)
+
+    # -----------------------------------------------------------------------
+    # fsoc_stage4_eval — Stage-4 Classical/AI/Hybrid evaluation (additive,
+    # evaluation-only). Depends on fsoc::ai_perception (detectors + Hybrid
+    # policy), fsoc::ai_datagen (common-frame degraded synthesis), fsoc::render
+    # + fsoc::core + fsoc::control (closed-loop degraded benchmark composes
+    # PanTiltCamera/Trajectory/PIDController/SyntheticCameraRenderer directly
+    # -- it does NOT link fsoc::simulation and does NOT reuse SimulationRunner,
+    # see include/fsoc/stage4_closed_loop_bench.hpp).
+    # -----------------------------------------------------------------------
+    add_library(fsoc_stage4_eval
+        src/stage4_degradation.cpp
+        src/stage4_metrics.cpp
+        src/stage4_scenarios.cpp
+        src/stage4_common_frame_bench.cpp
+        src/stage4_closed_loop_bench.cpp
+    )
+    add_library(fsoc::stage4_eval ALIAS fsoc_stage4_eval)
+    target_include_directories(fsoc_stage4_eval
+        PUBLIC
+            $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+            $<INSTALL_INTERFACE:include>
+            ${OpenCV_INCLUDE_DIRS}
+    )
+    target_compile_features(fsoc_stage4_eval PUBLIC cxx_std_20)
+    target_link_libraries(fsoc_stage4_eval
+        PUBLIC fsoc::core fsoc::control fsoc::render fsoc::perception fsoc::ai_perception fsoc::ai_datagen)
+    fsoc_set_project_warnings(fsoc_stage4_eval)
+    fsoc_enable_sanitizers(fsoc_stage4_eval)
+
+    add_executable(stage4_evaluation apps/stage4_evaluation.cpp)
+    target_link_libraries(stage4_evaluation PRIVATE fsoc::stage4_eval opencv_imgcodecs opencv_imgproc)
+    fsoc_set_project_warnings(stage4_evaluation)
+    fsoc_enable_sanitizers(stage4_evaluation)
 endif()
 
 if(FSOC_BUILD_TESTS)
@@ -384,6 +418,8 @@ if(FSOC_BUILD_TESTS)
 
         add_executable(fsoc_step11_tests tests/step11_tests.cpp)
         target_link_libraries(fsoc_step11_tests PRIVATE fsoc::demo_support fsoc::validation)
+        target_compile_definitions(fsoc_step11_tests
+            PRIVATE FSOC_PROJECT_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
         fsoc_set_project_warnings(fsoc_step11_tests)
         fsoc_enable_sanitizers(fsoc_step11_tests)
         add_test(NAME fsoc_step11_tests COMMAND fsoc_step11_tests)
@@ -425,5 +461,14 @@ if(FSOC_BUILD_TESTS)
         fsoc_set_project_warnings(fsoc_perception_integration_tests)
         fsoc_enable_sanitizers(fsoc_perception_integration_tests)
         add_test(NAME fsoc_perception_integration_tests COMMAND fsoc_perception_integration_tests)
+
+        # --- Stage 4: determinism of scenario/degradation/benchmark tooling ---
+        add_executable(fsoc_stage4_determinism_tests tests/stage4_determinism_tests.cpp)
+        target_link_libraries(fsoc_stage4_determinism_tests PRIVATE fsoc::stage4_eval)
+        target_compile_definitions(fsoc_stage4_determinism_tests
+            PRIVATE FSOC_PROJECT_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+        fsoc_set_project_warnings(fsoc_stage4_determinism_tests)
+        fsoc_enable_sanitizers(fsoc_stage4_determinism_tests)
+        add_test(NAME fsoc_stage4_determinism_tests COMMAND fsoc_stage4_determinism_tests)
     endif()
 endif()
