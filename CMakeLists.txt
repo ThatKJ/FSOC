@@ -25,6 +25,7 @@ add_library(fsoc_core
     src/trajectory.cpp
     src/observation.cpp
     src/tracking_error.cpp
+    src/target_tracker.cpp
 )
 add_library(fsoc::core ALIAS fsoc_core)
 
@@ -378,6 +379,12 @@ if(FSOC_BUILD_TESTS)
     fsoc_set_project_warnings(fsoc_step6_tests)
     fsoc_enable_sanitizers(fsoc_step6_tests)
     add_test(NAME fsoc_step6_tests COMMAND fsoc_step6_tests)
+
+    add_executable(fsoc_target_tracker_tests tests/target_tracker_tests.cpp)
+    target_link_libraries(fsoc_target_tracker_tests PRIVATE fsoc::core)
+    fsoc_set_project_warnings(fsoc_target_tracker_tests)
+    fsoc_enable_sanitizers(fsoc_target_tracker_tests)
+    add_test(NAME fsoc_target_tracker_tests COMMAND fsoc_target_tracker_tests)
 
     if(FSOC_OPENCV_AVAILABLE)
         add_executable(fsoc_step4_tests tests/step4_tests.cpp)
