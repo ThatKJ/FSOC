@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <vector>
 
 #include "fsoc/ai_beacon_detector.hpp"
@@ -9,6 +10,7 @@
 #include "fsoc/perception.hpp"
 #include "fsoc/stage4_common_frame_bench.hpp"  // HybridSourceCounts
 #include "fsoc/stage4_scenarios.hpp"
+#include "fsoc/target_tracker.hpp"
 
 namespace fsoc::stage4 {
 
@@ -96,6 +98,21 @@ struct ClosedLoopScenarioModeResult {
 // `target.position_m`) is used ONLY for the control-outlier safety metric and
 // reacquisition/loss bookkeeping inside THIS evaluator -- it never reaches
 // `classical_detector`, `ai_detector`, or `resolve_perception()`.
+//
+// `tracker_config` (P0-v2, Phase E/F, additive) -- default std::nullopt
+// reproduces the EXACT pre-tracker loop bit-for-bit (see
+// stage4_tracker_gate_bit_identical_when_disabled in
+// tests/stage4_determinism_tests.cpp). When present, a fresh TargetTracker is
+// constructed for this (scenario, mode, seed) run and layered AFTER
+// resolve_perception() exactly as fsoc::SimulationRunner::step() does: the
+// tracker consumes whatever resolve_perception() already accepted (Classical
+// alone, or the Safe Hybrid fused candidate), and every downstream metric
+// (accepted_frames, the truth-scored control-outlier counters, tracking_error)
+// is computed from the TRACKER's gated output, not the raw perception output
+// -- this is what actually reaches "control" in this evaluator, matching the
+// real runner. `tracker_min_confidence_to_steer` is is_safe_to_steer()'s one
+// threshold (see fsoc/target_tracker.hpp); ignored when tracker_config is
+// std::nullopt.
 [[nodiscard]] ClosedLoopRawSeedResult run_closed_loop_scenario_mode_seed(
     ScenarioId scenario,
     fsoc::PerceptionMode mode,
@@ -103,7 +120,9 @@ struct ClosedLoopScenarioModeResult {
     std::size_t seed_index,
     const ClosedLoopBenchConfig& bench_config,
     const fsoc::BeaconDetector& classical_detector,
-    const fsoc::AiBeaconDetector& ai_detector);
+    const fsoc::AiBeaconDetector& ai_detector,
+    std::optional<fsoc::TargetTrackerConfig> tracker_config = std::nullopt,
+    double tracker_min_confidence_to_steer = 0.4);
 
 // Pools raw per-seed samples and computes the final aggregate metrics
 // (median/RMS/P95/max over the POOLED sample set, not an average of per-seed

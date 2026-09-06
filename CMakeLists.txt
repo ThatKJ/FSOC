@@ -351,6 +351,11 @@ if(FSOC_OPENCV_AVAILABLE)
     target_link_libraries(stage4_evaluation PRIVATE fsoc::stage4_eval opencv_imgcodecs opencv_imgproc)
     fsoc_set_project_warnings(stage4_evaluation)
     fsoc_enable_sanitizers(stage4_evaluation)
+
+    add_executable(stage4_tracker_ablation apps/stage4_tracker_ablation.cpp)
+    target_link_libraries(stage4_tracker_ablation PRIVATE fsoc::stage4_eval)
+    fsoc_set_project_warnings(stage4_tracker_ablation)
+    fsoc_enable_sanitizers(stage4_tracker_ablation)
 endif()
 
 if(FSOC_BUILD_TESTS)

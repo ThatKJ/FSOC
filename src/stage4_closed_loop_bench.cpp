@@ -51,7 +51,13 @@ void tally_hybrid_source(const fsoc::PerceptionResult& perception, HybridSourceC
 ClosedLoopRawSeedResult run_closed_loop_scenario_mode_seed(
     const ScenarioId scenario, const fsoc::PerceptionMode mode, const std::uint64_t base_seed,
     const std::size_t seed_index, const ClosedLoopBenchConfig& bench_config,
-    const fsoc::BeaconDetector& classical_detector, const fsoc::AiBeaconDetector& ai_detector) {
+    const fsoc::BeaconDetector& classical_detector, const fsoc::AiBeaconDetector& ai_detector,
+    const std::optional<fsoc::TargetTrackerConfig> tracker_config,
+    const double tracker_min_confidence_to_steer) {
+    std::optional<fsoc::TargetTracker> tracker;
+    if (tracker_config.has_value()) {
+        tracker.emplace(*tracker_config);
+    }
     const fsoc::CameraConfig camera_config{};
     fsoc::PanTiltCamera camera{camera_config, fsoc::Vec3{0.0, 0.0, 0.0}, 0.0, 0.0};
     const fsoc::SyntheticCameraRenderer renderer{closed_loop_renderer_config(scenario)};
@@ -130,16 +136,33 @@ ClosedLoopRawSeedResult run_closed_loop_scenario_mode_seed(
             tally_hybrid_source(perception, raw.hybrid_sources);
         }
 
-        if (perception.detection.has_value()) {
+        // P0-v2 (Phase E/F): when a tracker is configured, it is layered AFTER
+        // resolve_perception() -- final_detection (not perception.detection)
+        // is what every metric below scores, exactly matching what
+        // fsoc::SimulationRunner::step() hands to the controller.
+        std::optional<fsoc::BeaconDetection> final_detection = perception.detection;
+        if (tracker.has_value()) {
+            const std::optional<fsoc::ImagePoint> measurement =
+                perception.detection.has_value()
+                    ? std::optional<fsoc::ImagePoint>(perception.detection->centroid_px)
+                    : std::nullopt;
+            const fsoc::TrackedState tracked = tracker->update(measurement, bench_config.dt_s);
+            final_detection = fsoc::is_safe_to_steer(tracked, tracker_min_confidence_to_steer)
+                                   ? std::optional<fsoc::BeaconDetection>(
+                                         fsoc::BeaconDetection{.centroid_px = {tracked.x_px, tracked.y_px}})
+                                   : std::nullopt;
+        }
+
+        if (final_detection.has_value()) {
             ++raw.accepted_frames;
         } else {
             ++raw.target_lost_frames;
         }
 
         // Evaluator-only, truth-scored control-outlier safety metric.
-        if (perception.detection.has_value() && observation.image_point_px.has_value()) {
-            const double dx = perception.detection->centroid_px.x_px - observation.image_point_px->x_px;
-            const double dy = perception.detection->centroid_px.y_px - observation.image_point_px->y_px;
+        if (final_detection.has_value() && observation.image_point_px.has_value()) {
+            const double dx = final_detection->centroid_px.x_px - observation.image_point_px->x_px;
+            const double dy = final_detection->centroid_px.y_px - observation.image_point_px->y_px;
             const double error_px = std::hypot(dx, dy);
             raw.max_control_error_px = std::max(raw.max_control_error_px, error_px);
             if (error_px > 20.0) ++raw.control_outlier_gt20;
@@ -148,7 +171,7 @@ ClosedLoopRawSeedResult run_closed_loop_scenario_mode_seed(
         }
 
         const std::optional<fsoc::TrackingError> tracking_error =
-            fsoc::compute_tracking_error(perception.detection, camera);
+            fsoc::compute_tracking_error(final_detection, camera);
 
         const bool tracking_now = tracking_error.has_value();
         if (!tracking_now) {

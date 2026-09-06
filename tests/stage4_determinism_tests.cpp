@@ -181,6 +181,50 @@ void test_degradation_seed_independent_of_mode() {
     }
 }
 
+// ---- 6. closed-loop tracker seam (P0-v2 Phase E/F): disabled is bit-
+//         identical to omitted, enabled is deterministic and materially
+//         changes the outcome on a false-lock-prone scenario -------------
+
+void test_closed_loop_tracker_seam() {
+    const BeaconDetector classical{BeaconDetectorConfig{}};
+    const AiBeaconDetector ai{ai_config()};
+    fsoc::stage4::ClosedLoopBenchConfig bench{};
+    bench.duration_s = 4.0;
+    bench.warmup_frames_for_latency = 5;
+
+    const auto baseline = fsoc::stage4::run_closed_loop_scenario_mode_seed(
+        fsoc::stage4::ScenarioId::BrightDistractor, PerceptionMode::Classical,
+        fsoc::stage4::kStage4BaseSeeds[0], 0, bench, classical, ai);
+    const auto explicit_disabled = fsoc::stage4::run_closed_loop_scenario_mode_seed(
+        fsoc::stage4::ScenarioId::BrightDistractor, PerceptionMode::Classical,
+        fsoc::stage4::kStage4BaseSeeds[0], 0, bench, classical, ai, std::nullopt, 0.4);
+
+    CHECK(baseline.accepted_frames == explicit_disabled.accepted_frames);
+    CHECK(baseline.control_outlier_gt50 == explicit_disabled.control_outlier_gt50);
+    CHECK(baseline.max_control_error_px == explicit_disabled.max_control_error_px);
+
+    const fsoc::TargetTrackerConfig tracker_cfg{};  // defaults
+    const auto with_tracker_1 = fsoc::stage4::run_closed_loop_scenario_mode_seed(
+        fsoc::stage4::ScenarioId::BrightDistractor, PerceptionMode::Classical,
+        fsoc::stage4::kStage4BaseSeeds[0], 0, bench, classical, ai, tracker_cfg, 0.4);
+    const auto with_tracker_2 = fsoc::stage4::run_closed_loop_scenario_mode_seed(
+        fsoc::stage4::ScenarioId::BrightDistractor, PerceptionMode::Classical,
+        fsoc::stage4::kStage4BaseSeeds[0], 0, bench, classical, ai, tracker_cfg, 0.4);
+
+    // Determinism holds with the tracker enabled too.
+    CHECK(with_tracker_1.accepted_frames == with_tracker_2.accepted_frames);
+    CHECK(with_tracker_1.control_outlier_gt50 == with_tracker_2.control_outlier_gt50);
+    CHECK(with_tracker_1.max_control_error_px == with_tracker_2.max_control_error_px);
+
+    // The tracker's temporal-consistency gate must materially reduce the
+    // worst-case truth-scored control error on a scenario designed to
+    // false-lock Classical onto spatially-random clutter (BrightDistractor's
+    // distractor is re-randomized across the whole frame every frame,
+    // independent of the beacon -- see stage4_degradation.cpp apply_clutter)
+    // -- if it didn't, the seam would be dead code.
+    CHECK(with_tracker_1.max_control_error_px < baseline.max_control_error_px);
+}
+
 }  // namespace
 
 int main() {
@@ -189,6 +233,7 @@ int main() {
     test_common_frame_scenario_is_deterministic();
     test_closed_loop_scenario_is_deterministic();
     test_degradation_seed_independent_of_mode();
+    test_closed_loop_tracker_seam();
 
     if (failures == 0) {
         std::cout << "PASS: Stage-4 determinism checks passed.\n";
