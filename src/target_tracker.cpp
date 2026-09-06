@@ -16,6 +16,16 @@ const char* to_string(const LockState state) noexcept {
     return "SEARCHING";
 }
 
+bool is_safe_to_steer(const TrackedState& state, const double min_confidence_to_steer) noexcept {
+    if (state.lock_state == LockState::Tracking) {
+        return true;
+    }
+    if (state.lock_state == LockState::Coasting) {
+        return state.confidence >= min_confidence_to_steer;
+    }
+    return false;
+}
+
 void TargetTrackerConfig::validate() const {
     if (!(std::isfinite(alpha) && alpha > 0.0 && alpha <= 1.0)) {
         throw std::invalid_argument("TargetTrackerConfig: alpha must be finite in (0, 1].");

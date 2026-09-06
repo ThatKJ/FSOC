@@ -330,6 +330,37 @@ void test_deterministic() {
     }
 }
 
+// ---- 18. is_safe_to_steer: the explicit control-safety policy ----
+
+void test_is_safe_to_steer_policy() {
+    TrackedState tracking{};
+    tracking.lock_state = LockState::Tracking;
+    CHECK(fsoc::is_safe_to_steer(tracking, 0.4));  // Tracking is always safe
+
+    TrackedState coasting_confident{};
+    coasting_confident.lock_state = LockState::Coasting;
+    coasting_confident.confidence = 0.5;
+    CHECK(fsoc::is_safe_to_steer(coasting_confident, 0.4));
+
+    TrackedState coasting_stale{};
+    coasting_stale.lock_state = LockState::Coasting;
+    coasting_stale.confidence = 0.25;
+    CHECK(!fsoc::is_safe_to_steer(coasting_stale, 0.4));
+
+    TrackedState lost{};
+    lost.lock_state = LockState::Lost;
+    CHECK(!fsoc::is_safe_to_steer(lost, 0.0));  // never safe, even at a permissive threshold
+
+    TrackedState searching{};
+    searching.lock_state = LockState::Searching;
+    CHECK(!fsoc::is_safe_to_steer(searching, 0.0));
+
+    TrackedState acquiring{};
+    acquiring.lock_state = LockState::Acquiring;
+    acquiring.confidence = 1.0;
+    CHECK(!fsoc::is_safe_to_steer(acquiring, 0.0));  // unconfirmed track is never safe to predict from
+}
+
 }  // namespace
 
 int main() {
@@ -350,9 +381,10 @@ int main() {
     test_invalid_config_rejected();
     test_zero_coast_frames_disables_coasting();
     test_deterministic();
+    test_is_safe_to_steer_policy();
 
     if (failures == 0) {
-        std::cout << "PASS: 17 TargetTracker checks passed.\n";
+        std::cout << "PASS: 18 TargetTracker checks passed.\n";
         return 0;
     }
     std::cerr << "FAILED: " << failures << " check(s).\n";

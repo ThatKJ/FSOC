@@ -16,6 +16,7 @@
 #include "fsoc/pid_controller.hpp"
 #include "fsoc/renderer.hpp"
 #include "fsoc/target_state.hpp"
+#include "fsoc/target_tracker.hpp"
 #include "fsoc/tracking_error.hpp"
 #include "fsoc/trajectory.hpp"
 
@@ -80,6 +81,14 @@ struct SimulationStepResult {
 
     // --- perception diagnostics (Stage 3, additive) — DIAGNOSTIC ONLY, never fed to control ---
     PerceptionDiagnostics perception{};
+
+    // --- state estimation / temporal gate (P0-v2, additive) ---
+    // Default-constructed (LockState::Searching) when config_.tracker_enabled
+    // is false -- the tracker is never constructed and never runs in that
+    // (default) case. When enabled, this is the tracker's own output state
+    // for this frame; `detection` above already reflects whatever it decided
+    // (see SimulationRunner::step() for the exact rule).
+    TrackedState tracked_state{};
 };
 
 struct SimulationRunnerConfig {
@@ -104,13 +113,28 @@ struct SimulationRunnerConfig {
     PerceptionMode perception_mode{PerceptionMode::Classical};
     std::optional<AiBeaconDetectorConfig> ai_detector{};
 
+    // State-estimation / temporal-gate seam (P0-v2). DEFAULT false ->
+    // bit-identical to pre-tracker behaviour (regression-tested): the tracker
+    // is never constructed and never runs; `result.detection` is exactly
+    // `resolve_perception()`'s own output, unchanged. When true, `tracker`
+    // configures the alpha-beta filter + coast horizon + outlier gate, and
+    // `tracker_min_confidence_to_steer` is the ONE threshold controlling
+    // whether the controller may steer toward a coasted (predicted) position
+    // during a brief dropout (fsoc::is_safe_to_steer) -- see
+    // include/fsoc/target_tracker.hpp and docs/MVP_ABLATION.md.
+    bool tracker_enabled{false};
+    TargetTrackerConfig tracker{};
+    double tracker_min_confidence_to_steer{0.4};
+
     // Validates every sub-config, that renderer dimensions match the camera, that
     // timestep_s is finite and > 0, that each PID output limit does not exceed
     // the corresponding camera actuator rate, that initial_pan_rad/initial_tilt_rad/
     // camera_position_m are all finite, that initial_tilt_rad lies within the
     // camera's [min_tilt_rad, max_tilt_rad] (otherwise PanTiltCamera would silently
-    // clamp it instead of failing), and that ai_detector is present whenever
-    // perception_mode != Classical. Throws std::invalid_argument.
+    // clamp it instead of failing), that ai_detector is present whenever
+    // perception_mode != Classical, and (iff tracker_enabled) that `tracker` and
+    // `tracker_min_confidence_to_steer` are themselves valid. Throws
+    // std::invalid_argument.
     void validate() const;
 };
 
@@ -148,6 +172,7 @@ private:
     BeaconDetector detector_;
     PIDController controller_;
     std::optional<AiBeaconDetector> ai_detector_;  // present iff perception_mode != Classical
+    std::optional<TargetTracker> tracker_;         // present iff tracker_enabled
     double simulation_time_s_{0.0};
     std::size_t frame_index_{0};
 };

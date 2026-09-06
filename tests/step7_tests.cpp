@@ -338,6 +338,173 @@ void test_reappearance_after_loss() {
     }
 }
 
+// ---- tracker seam: bit-identical when disabled + real closed-loop bridging --
+//
+// A minimal, deterministic trajectory that sits at `in_fov_position_m` for all
+// time except a single closed [dropout_start_s, dropout_end_s) window, during
+// which it reports `out_of_fov_position_m` -- an engineered, exact-length
+// detection dropout (as opposed to test_reappearance_after_loss's incidental,
+// multi-frame sinusoid loss) so the tracker's coast horizon and confidence
+// decay can be exercised at precise frame boundaries.
+class BriefDropoutTrajectory final : public fsoc::Trajectory {
+public:
+    BriefDropoutTrajectory(
+        const Vec3 in_fov_position_m,
+        const Vec3 out_of_fov_position_m,
+        const double dropout_start_s,
+        const double dropout_end_s)
+        : in_position_(in_fov_position_m),
+          out_position_(out_of_fov_position_m),
+          dropout_start_s_(dropout_start_s),
+          dropout_end_s_(dropout_end_s) {}
+
+    [[nodiscard]] fsoc::TargetState state_at(const double time_s) const override {
+        fsoc::TargetState state{};
+        state.position_m =
+            (time_s >= dropout_start_s_ && time_s < dropout_end_s_) ? out_position_ : in_position_;
+        state.velocity_mps = Vec3{0.0, 0.0, 0.0};
+        return state;
+    }
+
+private:
+    Vec3 in_position_;
+    Vec3 out_position_;
+    double dropout_start_s_;
+    double dropout_end_s_;
+};
+
+void test_tracker_disabled_is_bit_identical_to_baseline() {
+    const fsoc::SimulationRunnerConfig cfg_plain = fsoc::baseline_runner_config();
+
+    // Same config, tracker_enabled left false, but every tracker knob is
+    // deliberately set to conspicuously non-default values. If disabling the
+    // tracker is a genuine no-op (the seam it must be), these values must
+    // never be read.
+    fsoc::SimulationRunnerConfig cfg_with_unused_tracker = cfg_plain;
+    cfg_with_unused_tracker.tracker.alpha = 0.9;
+    cfg_with_unused_tracker.tracker.beta = 0.9;
+    cfg_with_unused_tracker.tracker.outlier_gate_px = 1.0;
+    cfg_with_unused_tracker.tracker.max_coast_frames = 0;
+    cfg_with_unused_tracker.tracker_min_confidence_to_steer = 0.99;
+
+    fsoc::SinusoidalTrajectory::Parameters p{};
+    p.center_position_m = Vec3{100.0, 0.0, 3.0};
+    p.amplitude_m = Vec3{0.0, 42.0, 4.0};
+    p.frequency_hz = Vec3{0.0, 0.30, 0.10};
+    const fsoc::SinusoidalTrajectory target{p};
+
+    SimulationRunner a{cfg_plain, target};
+    SimulationRunner b{cfg_with_unused_tracker, target};
+    const auto ra = a.run_for(5.0);
+    const auto rb = b.run_for(5.0);
+
+    CHECK(ra.size() == rb.size());
+    for (std::size_t i = 0; i < ra.size(); ++i) {
+        CHECK(ra[i].detection.has_value() == rb[i].detection.has_value());
+        if (ra[i].detection.has_value() && rb[i].detection.has_value()) {
+            CHECK(ra[i].detection->centroid_px.x_px == rb[i].detection->centroid_px.x_px);
+            CHECK(ra[i].detection->centroid_px.y_px == rb[i].detection->centroid_px.y_px);
+        }
+        CHECK(ra[i].camera_pan_rad == rb[i].camera_pan_rad);
+        CHECK(ra[i].camera_tilt_rad == rb[i].camera_tilt_rad);
+        CHECK(ra[i].command.pan_rate_rad_s == rb[i].command.pan_rate_rad_s);
+        CHECK(ra[i].command.tilt_rate_rad_s == rb[i].command.tilt_rate_rad_s);
+        // The tracker must never have been constructed/run: its output stays
+        // default-constructed (LockState::Searching) for the entire run.
+        CHECK(rb[i].tracked_state.lock_state == fsoc::LockState::Searching);
+    }
+}
+
+void test_tracker_bridges_one_frame_dropout_in_closed_loop() {
+    auto cfg = fsoc::baseline_runner_config();
+    cfg.tracker_enabled = true;  // TargetTrackerConfig{} defaults throughout
+
+    const Vec3 in_pos{100.0, 0.0, 0.0};    // centered on the default camera axis
+    const Vec3 out_pos{100.0, 500.0, 0.0};  // far outside the narrow FOV
+    const double dt = cfg.timestep_s;
+    // Exactly one frame (index 20) reports out_pos; every other frame reports
+    // in_pos.
+    const BriefDropoutTrajectory target{in_pos, out_pos, 20.0 * dt, 21.0 * dt};
+
+    SimulationRunner runner{cfg, target};
+    const auto results = runner.run_for(1.0);
+
+    // Acquisition: the tracker needs acquire_frames_required (3) consecutive
+    // real measurements before Tracking; by the frame right before the
+    // dropout it must be an established track.
+    CHECK(results[19].tracked_state.lock_state == fsoc::LockState::Tracking);
+    CHECK(results[19].detection.has_value());
+
+    // The dropout frame: classical perception sees nothing (target truly
+    // outside the FOV -- verified against the tracker-disabled baseline
+    // below), but the tracker bridges it by prediction. Confidence after one
+    // coast frame is 1.0 * confidence_decay_per_coast_frame (0.5) = 0.5,
+    // which is >= the default tracker_min_confidence_to_steer (0.4): safe to
+    // steer, so the control-facing detection stays populated.
+    CHECK(results[20].tracked_state.lock_state == fsoc::LockState::Coasting);
+    CHECK(results[20].tracked_state.is_prediction);
+    CHECK(results[20].tracked_state.coast_frames == 1);
+    CHECK_NEAR(results[20].tracked_state.confidence, 0.5, 1e-9);
+    CHECK(results[20].detection.has_value());
+    CHECK_NEAR(results[20].detection->centroid_px.x_px, results[19].detection->centroid_px.x_px, 1e-6);
+    CHECK_NEAR(results[20].detection->centroid_px.y_px, results[19].detection->centroid_px.y_px, 1e-6);
+
+    // Reacquisition: the very next frame's real measurement lands well inside
+    // the outlier gate (the target never actually moved), so the track goes
+    // straight back to Tracking -- no re-acquisition delay after a bridged gap.
+    CHECK(results[21].tracked_state.lock_state == fsoc::LockState::Tracking);
+    CHECK(results[21].detection.has_value());
+
+    // Cross-check against the SAME scenario with the tracker disabled: the
+    // classical/hybrid perception layer genuinely lost the target for that
+    // one frame -- the tracker is bridging a real gap, not fabricating one.
+    fsoc::SimulationRunnerConfig cfg_no_tracker = cfg;
+    cfg_no_tracker.tracker_enabled = false;
+    SimulationRunner baseline{cfg_no_tracker, target};
+    const auto baseline_results = baseline.run_for(1.0);
+    CHECK(!baseline_results[20].detection.has_value());
+    CHECK(baseline_results[19].detection.has_value());
+    CHECK(baseline_results[21].detection.has_value());
+}
+
+void test_tracker_two_frame_dropout_exercises_confidence_gate_in_closed_loop() {
+    auto cfg = fsoc::baseline_runner_config();
+    cfg.tracker_enabled = true;
+
+    const Vec3 in_pos{100.0, 0.0, 0.0};
+    const Vec3 out_pos{100.0, 500.0, 0.0};
+    const double dt = cfg.timestep_s;
+    // Exactly two consecutive frames (20, 21) report out_pos -- still within
+    // max_coast_frames (2), so the tracker stays Coasting (not Lost)
+    // throughout, but the SECOND coast frame's decayed confidence
+    // (1.0 * 0.5 * 0.5 = 0.25) drops below tracker_min_confidence_to_steer
+    // (0.4): is_safe_to_steer must go false even though the tracker itself
+    // has not declared the track lost. This is the deliberate distinction
+    // between "still tracked" (TargetTracker's own bookkeeping) and "safe to
+    // steer" (the separate, explicit control-safety policy) -- see
+    // include/fsoc/target_tracker.hpp.
+    const BriefDropoutTrajectory target{in_pos, out_pos, 20.0 * dt, 22.0 * dt};
+
+    SimulationRunner runner{cfg, target};
+    const auto results = runner.run_for(1.0);
+
+    CHECK(results[19].tracked_state.lock_state == fsoc::LockState::Tracking);
+
+    CHECK(results[20].tracked_state.lock_state == fsoc::LockState::Coasting);
+    CHECK(results[20].tracked_state.coast_frames == 1);
+    CHECK_NEAR(results[20].tracked_state.confidence, 0.5, 1e-9);
+    CHECK(results[20].detection.has_value());  // first coast frame: safe to steer
+
+    CHECK(results[21].tracked_state.lock_state == fsoc::LockState::Coasting);
+    CHECK(results[21].tracked_state.coast_frames == 2);
+    CHECK_NEAR(results[21].tracked_state.confidence, 0.25, 1e-9);
+    CHECK(!results[21].detection.has_value());  // second coast frame: NOT safe to steer
+
+    // The track itself survived (never Lost) and reacquires cleanly.
+    CHECK(results[22].tracked_state.lock_state == fsoc::LockState::Tracking);
+    CHECK(results[22].detection.has_value());
+}
+
 // ---- 18 / 19. command and applied-rate limits (checked broadly) --
 
 void test_rate_limits_respected() {
@@ -539,6 +706,9 @@ int main() {
     test_closed_beats_open();
     test_no_detection_path();
     test_reappearance_after_loss();
+    test_tracker_disabled_is_bit_identical_to_baseline();
+    test_tracker_bridges_one_frame_dropout_in_closed_loop();
+    test_tracker_two_frame_dropout_exercises_confidence_gate_in_closed_loop();
     test_rate_limits_respected();
     test_control_follows_detected_not_truth();
     test_manual_one_frame_trace();
@@ -547,7 +717,7 @@ int main() {
     test_prior_steps_regression();
 
     if (failures == 0) {
-        std::cout << "PASS: 14 Step-7 closed-loop checks passed.\n";
+        std::cout << "PASS: 17 Step-7 closed-loop checks passed.\n";
         return 0;
     }
     std::cerr << "FAILED: " << failures << " check(s).\n";

@@ -111,6 +111,17 @@ struct TrackedState {
                                                 // this frame but failed the gate
 };
 
+// Explicit, visible control-safety policy (kept OUTSIDE TargetTracker itself,
+// which stays a pure state estimator with no notion of "is this safe to
+// steer with"): a Tracking state is always safe; a Coasting (predicted)
+// state is safe only while its decayed confidence has not yet dropped below
+// `min_confidence_to_steer`. Searching/Acquiring/Lost are never safe (no
+// confirmed track to predict from). This is the ONE rule the controller
+// actually uses to decide whether to steer toward a predicted position
+// during a brief dropout -- see docs/MVP_ABLATION.md for the evaluation
+// that justifies the default threshold.
+[[nodiscard]] bool is_safe_to_steer(const TrackedState& state, double min_confidence_to_steer) noexcept;
+
 class TargetTracker {
 public:
     explicit TargetTracker(TargetTrackerConfig config = {});

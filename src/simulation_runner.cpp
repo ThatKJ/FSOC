@@ -66,6 +66,14 @@ void SimulationRunnerConfig::validate() const {
         }
         ai_detector->validate();
     }
+    if (tracker_enabled) {
+        tracker.validate();
+        if (!std::isfinite(tracker_min_confidence_to_steer) || tracker_min_confidence_to_steer < 0.0 ||
+            tracker_min_confidence_to_steer > 1.0) {
+            throw std::invalid_argument(
+                "SimulationRunnerConfig: tracker_min_confidence_to_steer must be finite in [0, 1].");
+        }
+    }
 }
 
 SimulationRunnerConfig baseline_runner_config() {
@@ -110,6 +118,9 @@ SimulationRunner::SimulationRunner(SimulationRunnerConfig config, const Trajecto
     if (config_.perception_mode != PerceptionMode::Classical) {
         ai_detector_.emplace(*config_.ai_detector);
     }
+    if (config_.tracker_enabled) {
+        tracker_.emplace(config_.tracker);
+    }
 }
 
 SimulationStepResult SimulationRunner::step() {
@@ -152,6 +163,26 @@ SimulationStepResult SimulationRunner::step() {
     result.detection = perception.detection;
     result.target_detected = perception.detection.has_value();
     result.perception = perception.diagnostics;
+
+    // 4b. state estimation / temporal gate (P0-v2, additive). Default
+    // (tracker_enabled == false) leaves result.detection/target_detected
+    // exactly as resolve_perception() produced them -- bit-identical to the
+    // pre-tracker control path.
+    if (config_.tracker_enabled) {
+        const std::optional<ImagePoint> measurement =
+            perception.detection.has_value()
+                ? std::optional<ImagePoint>(ImagePoint{perception.detection->centroid_px.x_px,
+                                                        perception.detection->centroid_px.y_px})
+                : std::nullopt;
+        result.tracked_state = tracker_->update(measurement, config_.timestep_s);
+        if (is_safe_to_steer(result.tracked_state, config_.tracker_min_confidence_to_steer)) {
+            result.detection =
+                BeaconDetection{.centroid_px = {result.tracked_state.x_px, result.tracked_state.y_px}};
+        } else {
+            result.detection = std::nullopt;
+        }
+        result.target_detected = result.detection.has_value();
+    }
 
     // 5. tracking error from the DETECTED (control-facing) centroid (never
     // observation.image_point_px)
@@ -206,6 +237,9 @@ void SimulationRunner::reset() {
     camera_ = PanTiltCamera{config_.camera, config_.camera_position_m, config_.initial_pan_rad,
                             config_.initial_tilt_rad};
     controller_.reset();
+    if (tracker_.has_value()) {
+        tracker_->reset();
+    }
     simulation_time_s_ = 0.0;
     frame_index_ = 0;
 }
