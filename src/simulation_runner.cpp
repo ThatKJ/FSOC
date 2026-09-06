@@ -32,6 +32,32 @@ void SimulationRunnerConfig::validate() const {
         throw std::invalid_argument(
             "SimulationRunnerConfig: PID tilt output limit exceeds camera max tilt rate.");
     }
+    // Initial pose / position sanity. Without these checks an out-of-range or
+    // wrong-unit initial_tilt_rad (e.g. degrees typed where radians are
+    // expected) is NOT rejected here -- it reaches PanTiltCamera's constructor,
+    // which silently std::clamp()s tilt to [min_tilt_rad, max_tilt_rad] instead
+    // of failing, so the scenario quietly starts at the wrong attitude. That is
+    // this codebase's equivalent of the "misspelled parameter silently changes
+    // behaviour" bug class: the field name is spelled correctly (the compiler
+    // already guarantees that for a plain C++ struct) but an invalid *value*
+    // is coerced rather than rejected. pan is intentionally NOT range-checked
+    // beyond finiteness: PanTiltCamera::wrap_pi() treats pan as periodic by
+    // design, so wrapping it is correct behaviour, not silent data loss.
+    if (!std::isfinite(initial_pan_rad)) {
+        throw std::invalid_argument("SimulationRunnerConfig: initial_pan_rad must be finite.");
+    }
+    if (!std::isfinite(initial_tilt_rad)) {
+        throw std::invalid_argument("SimulationRunnerConfig: initial_tilt_rad must be finite.");
+    }
+    if (initial_tilt_rad < camera.min_tilt_rad || initial_tilt_rad > camera.max_tilt_rad) {
+        throw std::invalid_argument(
+            "SimulationRunnerConfig: initial_tilt_rad is outside the camera's "
+            "[min_tilt_rad, max_tilt_rad] range (it would otherwise be silently clamped).");
+    }
+    if (!std::isfinite(camera_position_m.x) || !std::isfinite(camera_position_m.y) ||
+        !std::isfinite(camera_position_m.z)) {
+        throw std::invalid_argument("SimulationRunnerConfig: camera_position_m must be finite.");
+    }
     if (perception_mode != PerceptionMode::Classical) {
         if (!ai_detector.has_value()) {
             throw std::invalid_argument(
@@ -105,6 +131,9 @@ SimulationStepResult SimulationRunner::step() {
 
     // 3. render the synthetic frame — the renderer sees ONLY the observation
     const cv::Mat frame = renderer_.render(observation);
+    // Store the EXACT frame handed to the detector below (diagnostic/observer
+    // only — a cheap refcounted cv::Mat copy, never read back into control).
+    result.rendered_frame = frame;
 
     // 4. detect — MEASUREMENT path, pixels only. Classical mode never
     // constructs/runs the AI detector (ai_detector_ stays std::nullopt), so

@@ -24,7 +24,6 @@
 #include "fsoc/detector.hpp"
 #include "fsoc/geometry.hpp"
 #include "fsoc/perception.hpp"
-#include "fsoc/renderer.hpp"
 #include "fsoc/simulation_runner.hpp"
 #include "fsoc/trajectory.hpp"
 
@@ -43,7 +42,6 @@ using fsoc::SimulationRunner;
 using fsoc::SimulationRunnerConfig;
 using fsoc::SimulationStepResult;
 using fsoc::StationaryTrajectory;
-using fsoc::SyntheticCameraRenderer;
 using fsoc::Vec3;
 using fsoc::baseline_runner_config;
 
@@ -128,19 +126,19 @@ void test_explicit_classical_matches_default() {
 
 // ---- 2. Classical mode's control-facing detection == standalone BeaconDetector ----
 //
-// SimulationStepResult.observation is the exact CameraObservation the frame
-// was rendered from (docs/15's frozen "base-frame reconstruction" pattern,
-// also used by fsoc_visualization / fsoc_validation): re-rendering it and
-// running the SAME BeaconDetector config must reproduce the runner's
-// control-facing detection exactly, proving Stage-3 integration did not
-// perturb the Classical path.
+// SimulationStepResult.rendered_frame is the EXACT frame the runner's own
+// detector consumed this step (P0: stored on the result, not re-derived from
+// `observation` — re-rendering is only guaranteed identical to the detector's
+// input while rendering stays a pure, noise-free function of the observation).
+// Running the SAME BeaconDetector config on that stored frame must reproduce
+// the runner's control-facing detection exactly, proving Stage-3 integration
+// did not perturb the Classical path.
 
 void test_classical_detection_matches_standalone_detector() {
     SimulationRunnerConfig config = baseline_runner_config();
     const auto trajectory = centred_target();
     SimulationRunner runner{config, trajectory};
 
-    const SyntheticCameraRenderer renderer{config.renderer};
     const BeaconDetector detector{config.detector};
 
     constexpr int kSteps = 25;
@@ -148,8 +146,7 @@ void test_classical_detection_matches_standalone_detector() {
     for (int i = 0; i < kSteps; ++i) {
         const SimulationStepResult result = runner.step();
 
-        const cv::Mat reconstructed_frame = renderer.render(result.observation);
-        const std::optional<fsoc::BeaconDetection> standalone = detector.detect(reconstructed_frame);
+        const std::optional<fsoc::BeaconDetection> standalone = detector.detect(result.rendered_frame);
 
         CHECK(standalone.has_value() == result.detection.has_value());
         if (standalone.has_value() && result.detection.has_value()) {

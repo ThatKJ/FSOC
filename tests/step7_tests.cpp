@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <iostream>
 #include <optional>
+#include <stdexcept>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -58,9 +59,24 @@ void check_near(
     }
 }
 
+template <typename Fn>
+void check_throws_invalid_argument(Fn&& fn, const std::string_view expression, const int line) {
+    bool threw = false;
+    try {
+        std::forward<Fn>(fn)();
+    } catch (const std::invalid_argument&) {
+        threw = true;
+    } catch (...) {
+        // wrong exception type is still a failure
+    }
+    check(threw, expression, line);
+}
+
 #define CHECK(expr) check((expr), #expr, __LINE__)
 #define CHECK_NEAR(actual, expected, tol) \
     check_near((actual), (expected), (tol), #actual " ~= " #expected, __LINE__)
+#define CHECK_THROWS_INVALID(expr) \
+    check_throws_invalid_argument([&] { (void)(expr); }, #expr, __LINE__)
 
 // ---- helpers -----------------------------------------------------
 
@@ -412,6 +428,66 @@ void test_manual_one_frame_trace() {
     CHECK(pixel_error_norm(r1) < pixel_error_norm(r0));
 }
 
+// ---- P0 config-validation regression -----------------------------
+//
+// SimulationRunnerConfig is a plain C++20 struct: a MISSPELLED field name
+// (the classic YAML/JSON "typo silently changes behaviour" bug) is not
+// representable at all -- it is a compile error. The real equivalent failure
+// mode in this architecture is a *correctly-named* field holding an
+// out-of-range or wrong-unit VALUE that used to be silently coerced instead
+// of rejected -- e.g. initial_tilt_rad outside the camera's mechanical limits
+// used to reach PanTiltCamera's constructor and get silently std::clamp()'d,
+// quietly starting the scenario at the wrong attitude. This test demonstrates
+// that class of bug is now caught before the simulation starts.
+
+void test_out_of_range_initial_tilt_rejected() {
+    fsoc::SimulationRunnerConfig cfg = fsoc::baseline_runner_config();
+    const fsoc::StationaryTrajectory target{Vec3{100.0, 0.0, 0.0}};
+
+    // Camera default tilt limits are +/-80 deg (fsoc/config.hpp). 150 deg is a
+    // realistic "meant degrees, unit/typo mistake" out-of-range value that
+    // PRE-FIX would have been silently clamped to +80 deg instead of rejected.
+    cfg.initial_tilt_rad = deg_to_rad(150.0);
+    CHECK_THROWS_INVALID(cfg.validate());
+    CHECK_THROWS_INVALID(SimulationRunner(cfg, target));
+
+    // Symmetric check on the other side of the range.
+    fsoc::SimulationRunnerConfig cfg_neg = fsoc::baseline_runner_config();
+    cfg_neg.initial_tilt_rad = deg_to_rad(-150.0);
+    CHECK_THROWS_INVALID(cfg_neg.validate());
+
+    // A boundary-valid tilt (exactly at the limit) must NOT throw.
+    fsoc::SimulationRunnerConfig cfg_boundary = fsoc::baseline_runner_config();
+    cfg_boundary.initial_tilt_rad = cfg_boundary.camera.max_tilt_rad;
+    bool boundary_ok = true;
+    try {
+        cfg_boundary.validate();
+        const SimulationRunner runner{cfg_boundary, target};
+        (void)runner;
+    } catch (...) {
+        boundary_ok = false;
+    }
+    CHECK(boundary_ok);
+}
+
+void test_non_finite_initial_pose_rejected() {
+    const fsoc::StationaryTrajectory target{Vec3{100.0, 0.0, 0.0}};
+    const double nan_value = std::nan("");
+
+    fsoc::SimulationRunnerConfig bad_pan = fsoc::baseline_runner_config();
+    bad_pan.initial_pan_rad = nan_value;
+    CHECK_THROWS_INVALID(bad_pan.validate());
+
+    fsoc::SimulationRunnerConfig bad_tilt = fsoc::baseline_runner_config();
+    bad_tilt.initial_tilt_rad = nan_value;
+    CHECK_THROWS_INVALID(bad_tilt.validate());
+
+    fsoc::SimulationRunnerConfig bad_position = fsoc::baseline_runner_config();
+    bad_position.camera_position_m = Vec3{nan_value, 0.0, 0.0};
+    CHECK_THROWS_INVALID(bad_position.validate());
+    CHECK_THROWS_INVALID(SimulationRunner(bad_position, target));
+}
+
 // ---- 21..26. prior steps still green (behavioural spot checks) ----
 
 void test_prior_steps_regression() {
@@ -466,10 +542,12 @@ int main() {
     test_rate_limits_respected();
     test_control_follows_detected_not_truth();
     test_manual_one_frame_trace();
+    test_out_of_range_initial_tilt_rejected();
+    test_non_finite_initial_pose_rejected();
     test_prior_steps_regression();
 
     if (failures == 0) {
-        std::cout << "PASS: 12 Step-7 closed-loop checks passed.\n";
+        std::cout << "PASS: 14 Step-7 closed-loop checks passed.\n";
         return 0;
     }
     std::cerr << "FAILED: " << failures << " check(s).\n";

@@ -396,6 +396,35 @@ void test_inputs_not_mutated() {
     CHECK(t.tracking_state == t_copy.tracking_state);
 }
 
+// ---- P0: rendered_frame IS the detector's exact input, not a lookalike ----
+//
+// Proves SimulationStepResult::rendered_frame is not merely "a frame that
+// happens to look the same" but is bit-for-bit the pixels detector_.detect()
+// actually ran on: re-running the SAME classical detector on the stored frame
+// reproduces the SAME centroid the runner already reported. This is the
+// property TrackingVisualizer / evidence export now rely on instead of
+// re-rendering from `observation`.
+
+void test_rendered_frame_is_detector_input() {
+    const auto cfg = fsoc::baseline_runner_config();
+    const fsoc::StationaryTrajectory target{fsoc::Vec3{100.0, 5.0, 2.0}};
+    fsoc::SimulationRunner runner{cfg, target};
+    const fsoc::BeaconDetector detector{cfg.detector};
+
+    for (int i = 0; i < 10; ++i) {
+        const SimulationStepResult r = runner.step();
+        CHECK(!r.rendered_frame.empty());
+        CHECK(r.rendered_frame.type() == CV_8UC1);
+
+        const auto redetected = detector.detect(r.rendered_frame);
+        CHECK(redetected.has_value() == r.detection.has_value());
+        if (redetected.has_value() && r.detection.has_value()) {
+            CHECK(redetected->centroid_px.x_px == r.detection->centroid_px.x_px);
+            CHECK(redetected->centroid_px.y_px == r.detection->centroid_px.y_px);
+        }
+    }
+}
+
 // ---- 19. MANDATORY: visualization does not perturb the simulation --
 
 void test_visualization_non_interference() {
@@ -415,7 +444,12 @@ void test_visualization_non_interference() {
         a.push_back(runner_a.step());
     }
 
-    // B: same run, annotate a reconstructed frame after every step.
+    // B: same run, annotate the EXACT frame the detector consumed each step
+    // (SimulationStepResult::rendered_frame) — not a fresh re-render. A
+    // same-step cross-check against a fresh render is kept below as a
+    // trip-wire: it is only guaranteed to hold while rendering stays a pure,
+    // noise-free function of the observation, and will need attention the
+    // moment disturbance work breaks that guarantee.
     const fsoc::SyntheticCameraRenderer renderer{sin_cfg.renderer};
     const TrackingVisualizer viz{VisualizationConfig{}};
     fsoc::SimulationRunner runner_b{sin_cfg, target};
@@ -423,8 +457,9 @@ void test_visualization_non_interference() {
     for (int i = 0; i < 500; ++i) {
         const SimulationStepResult r = runner_b.step();
         b.push_back(r);
-        const cv::Mat base = renderer.render(r.observation);
+        const cv::Mat& base = r.rendered_frame;
         const cv::Mat base_copy = base.clone();
+        CHECK(images_equal(base, renderer.render(r.observation)));  // trip-wire, see comment above
         const TelemetryRecord telem = fsoc::make_telemetry_record(
             r, sin_cfg.camera.max_pan_rate_rad_s, sin_cfg.camera.max_tilt_rate_rad_s);
         const cv::Mat display = viz.annotate(base, r, telem);
@@ -510,11 +545,12 @@ int main() {
     test_all_overlays_disabled();
     test_truth_marker_policy();
     test_inputs_not_mutated();
+    test_rendered_frame_is_detector_input();
     test_visualization_non_interference();
     test_prior_steps_regression();
 
     if (failures == 0) {
-        std::cout << "PASS: 15 Step-9 visualization checks passed.\n";
+        std::cout << "PASS: 16 Step-9 visualization checks passed.\n";
         return 0;
     }
     std::cerr << "FAILED: " << failures << " check(s).\n";

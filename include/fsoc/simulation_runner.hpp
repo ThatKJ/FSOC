@@ -4,6 +4,8 @@
 #include <optional>
 #include <vector>
 
+#include <opencv2/core.hpp>
+
 #include "fsoc/ai_beacon_detector.hpp"
 #include "fsoc/camera.hpp"
 #include "fsoc/config.hpp"
@@ -51,6 +53,17 @@ struct SimulationStepResult {
     CameraObservation observation{};                    // .image_point_px is the exact projection
     bool target_visible{};                              // observation.status == Visible
 
+    // --- EXACT PERCEPTION INPUT (diagnostic/observer only) ---
+    // The CV_8UC1 frame renderer_.render(observation) actually produced and
+    // handed to detector_.detect() THIS step. Stored (not re-derived) so an
+    // observer (TrackingVisualizer, evidence export) can annotate the exact
+    // pixels the detector saw rather than re-rendering from `observation` —
+    // re-rendering is only guaranteed identical while rendering is a pure,
+    // noise-free function of the observation. cv::Mat is reference-counted, so
+    // this assignment is a cheap header+refcount copy, not a pixel clone;
+    // never read by the detector, tracking-error, PID, or camera themselves.
+    cv::Mat rendered_frame{};
+
     // --- MEASUREMENT (the actual control feedback path) ---
     std::optional<BeaconDetection> detection{};         // from BeaconDetector, pixels only
     bool target_detected{};                             // detection.has_value()
@@ -93,8 +106,11 @@ struct SimulationRunnerConfig {
 
     // Validates every sub-config, that renderer dimensions match the camera, that
     // timestep_s is finite and > 0, that each PID output limit does not exceed
-    // the corresponding camera actuator rate, and that ai_detector is present
-    // whenever perception_mode != Classical. Throws std::invalid_argument.
+    // the corresponding camera actuator rate, that initial_pan_rad/initial_tilt_rad/
+    // camera_position_m are all finite, that initial_tilt_rad lies within the
+    // camera's [min_tilt_rad, max_tilt_rad] (otherwise PanTiltCamera would silently
+    // clamp it instead of failing), and that ai_detector is present whenever
+    // perception_mode != Classical. Throws std::invalid_argument.
     void validate() const;
 };
 
