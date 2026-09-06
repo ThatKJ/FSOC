@@ -82,10 +82,11 @@ struct ScenarioSpec {
 // test built on them) is untouched.
 [[nodiscard]] SimulationRunnerConfig make_config_with_perception(
     const ScenarioSpec& spec, const PerceptionMode mode,
-    std::optional<AiBeaconDetectorConfig> ai_detector) {
+    std::optional<AiBeaconDetectorConfig> ai_detector, const bool tracker_enabled) {
     SimulationRunnerConfig config = make_config(spec);
     config.perception_mode = mode;
     config.ai_detector = std::move(ai_detector);
+    config.tracker_enabled = tracker_enabled;
     return config;
 }
 
@@ -308,10 +309,10 @@ DemoSession::DemoSession(const DemoScenario scenario, const double duration_s)
 // otherwise untouched and remains the one every pre-Stage-3 caller/test uses.
 DemoSession::DemoSession(
     const DemoScenario scenario, const double duration_s, const PerceptionMode mode,
-    std::optional<AiBeaconDetectorConfig> ai_detector)
+    std::optional<AiBeaconDetectorConfig> ai_detector, const bool tracker_enabled)
     : scenario_(scenario),
       trajectory_(make_trajectory(spec_for(scenario))),
-      config_(make_config_with_perception(spec_for(scenario), mode, std::move(ai_detector))),
+      config_(make_config_with_perception(spec_for(scenario), mode, std::move(ai_detector), tracker_enabled)),
       duration_s_((require_positive_finite_duration(duration_s), duration_s)),
       total_frames_(frame_count(duration_s_, config_.timestep_s)),
       max_pan_rate_rad_s_(config_.camera.max_pan_rate_rad_s),
@@ -395,7 +396,7 @@ std::string demo_help_text() {
     std::string help;
     help += "fsoc_demo - SIH26169 FSOC baseline demo runner (v1_baseline, FROZEN)\n\n";
     help += "Usage:\n";
-    help += "  fsoc_demo <scenario> [--mode classical|ai|hybrid] [--duration <seconds>]\n";
+    help += "  fsoc_demo <scenario> [--mode classical|ai|hybrid] [--tracker] [--duration <seconds>]\n";
     help += "            [--csv <path>] [--quiet]\n";
     help += "  fsoc_demo --help\n\n";
     help += "Scenarios:\n";
@@ -414,15 +415,21 @@ std::string demo_help_text() {
     help += "                        ai/hybrid run the Stage-3 C++ ONNX TinyBeaconNet\n";
     help += "                        detector (models/tiny_beacon_net.onnx); falls back to\n";
     help += "                        classical with a warning if the model can't be loaded\n";
+    help += "  --tracker             enable the alpha-beta state estimator + temporal-\n";
+    help += "                        consistency gate (default off); bridges brief detection\n";
+    help += "                        gaps and rejects implausible jumps -- see\n";
+    help += "                        include/fsoc/target_tracker.hpp and docs/MVP_ABLATION.md\n";
     help += "  --duration <seconds>  override the scenario's validated duration (demo knob only)\n";
     help += "  --csv <path>          write the telemetry CSV for this run\n";
-    help += "                        (27 Step-8 fields + 7 Stage-3 perception fields)\n";
+    help += "                        (27 Step-8 fields + 7 Stage-3 perception fields\n";
+    help += "                        + 8 P0-v2 tracker fields, docs/08_TELEMETRY_SCHEMA.md)\n";
     help += "  --quiet               print only the end-of-run summary\n\n";
     help += "Notes:\n";
     help += "  Fixed 50 Hz simulation (dt = 0.02 s). The baseline PID (kp=12, ki=0, kd=0),\n";
     help += "  the classical detector, and v1_baseline itself are frozen and UNCHANGED by\n";
-    help += "  --mode; ai/hybrid only change which perception path feeds the SAME control\n";
-    help += "  loop (ADR-018 Safe Hybrid: AI never gets independent control authority).\n";
+    help += "  --mode or --tracker; they only change which perception/estimation path feeds\n";
+    help += "  the SAME control loop (ADR-018 Safe Hybrid: AI never gets independent control\n";
+    help += "  authority; ADR-019: the tracker is a post-perception gate, not a fusion change).\n";
     help += "  Core values are radians; the CLI prints degrees.";
     return help;
 }

@@ -223,9 +223,14 @@ public:
     // `mode == PerceptionMode::Classical` is bit-identical to the constructor
     // above. `ai_detector` is required (throws std::invalid_argument via
     // SimulationRunnerConfig::validate()) whenever mode != Classical.
+    // `tracker_enabled` (P0-v2, additive): default false is bit-identical to
+    // this constructor's pre-tracker behaviour; true layers TargetTracker
+    // (default TargetTrackerConfig, tracker_min_confidence_to_steer = 0.4)
+    // after whichever perception mode is selected -- see
+    // include/fsoc/target_tracker.hpp and docs/MVP_ABLATION.md.
     DemoSession(
         DemoScenario scenario, double duration_s, PerceptionMode mode,
-        std::optional<AiBeaconDetectorConfig> ai_detector = std::nullopt);
+        std::optional<AiBeaconDetectorConfig> ai_detector = std::nullopt, bool tracker_enabled = false);
 
     DemoSession(const DemoSession&) = delete;
     DemoSession& operator=(const DemoSession&) = delete;

@@ -705,6 +705,44 @@ void test_perception_aware_constructor_hybrid_runs_end_to_end() {
     CHECK(saw_any_ai_candidate);  // this scenario's beacon is clean/bright -> AI should fire at least once
 }
 
+// P0-v2: tracker_enabled defaults to false and must be bit-identical to a
+// DemoSession that never mentions it (the same additive-seam guarantee
+// SimulationRunner's own tracker_enabled default already has).
+void test_tracker_disabled_matches_default() {
+    for (const DemoScenario scenario : fsoc::all_demo_scenarios()) {
+        const double duration = 1.0;
+        DemoSession baseline{scenario, duration};
+        DemoSession explicit_disabled{scenario, duration, fsoc::PerceptionMode::Classical, std::nullopt, false};
+
+        bool identical = true;
+        while (!baseline.finished() && !explicit_disabled.finished() && identical) {
+            (void)baseline.step();
+            (void)explicit_disabled.step();
+            identical = step_results_equal(baseline.last_step_result(), explicit_disabled.last_step_result());
+        }
+        CHECK(identical);
+        CHECK(baseline.finished() == explicit_disabled.finished());
+    }
+}
+
+// tracker_enabled = true runs end-to-end through DemoSession and produces
+// real (non-default) tracker telemetry -- the CLI/frontend-facing seam
+// fsoc_demo --tracker uses.
+void test_tracker_enabled_runs_end_to_end() {
+    DemoSession session{DemoScenario::StaticAcquisition, 1.0, fsoc::PerceptionMode::Classical, std::nullopt, true};
+    bool saw_tracking_lock = false;
+    while (!session.finished()) {
+        (void)session.step();
+        const fsoc::TelemetryRecord& t = session.last_telemetry();
+        if (t.tracker_lock_state == "TRACKING") {
+            saw_tracking_lock = true;
+            CHECK(t.tracker_x_px.has_value());
+            CHECK(t.tracker_confidence.has_value());
+        }
+    }
+    CHECK(saw_tracking_lock);  // this scenario's beacon is clean -> the tracker should confirm a lock
+}
+
 }  // namespace
 
 int main() {
@@ -734,9 +772,11 @@ int main() {
     test_perception_aware_constructor_classical_matches_default();
     test_perception_aware_constructor_requires_ai_detector_for_hybrid();
     test_perception_aware_constructor_hybrid_runs_end_to_end();
+    test_tracker_disabled_matches_default();
+    test_tracker_enabled_runs_end_to_end();
 
     if (failures == 0) {
-        std::cout << "PASS: 26 Step-11 demo-packaging checks passed.\n";
+        std::cout << "PASS: 28 Step-11 demo-packaging checks passed.\n";
         return 0;
     }
     std::cerr << "FAILED: " << failures << " check(s).\n";

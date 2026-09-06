@@ -61,7 +61,8 @@ std::string deg(const double radians, const int precision, const int width) {
     return os.str();
 }
 
-void print_status_line(const DemoSnapshot& s, const TelemetryRecord& t, const bool show_perception) {
+void print_status_line(
+    const DemoSnapshot& s, const TelemetryRecord& t, const bool show_perception, const bool show_tracker) {
     std::cout << "t=" << std::fixed << std::setprecision(2) << std::setw(6) << s.simulation_time_s
               << "s  " << std::left << std::setw(11) << to_string(s.state) << std::right
               << "  tgt=(" << std::setprecision(1) << std::setw(7) << s.target.x_m << ","
@@ -96,6 +97,15 @@ void print_status_line(const DemoSnapshot& s, const TelemetryRecord& t, const bo
             std::cout << " rejected=" << t.perception_rejection_reason;
         }
     }
+    if (show_tracker) {
+        std::cout << "  lock=" << t.tracker_lock_state;
+        if (t.tracker_confidence.has_value()) {
+            std::cout << " conf=" << std::fixed << std::setprecision(2) << *t.tracker_confidence;
+        }
+        if (t.tracker_is_prediction) {
+            std::cout << " [PREDICTED]";
+        }
+    }
     std::cout << '\n';
 }
 
@@ -115,12 +125,15 @@ int main(int argc, char** argv) {
     std::optional<double> duration_override;
     std::string csv_path;
     bool quiet = false;
+    bool tracker_enabled = false;
     std::string mode_token = "classical";
 
     for (std::size_t i = 0; i < args.size(); ++i) {
         const std::string& arg = args[i];
         if (arg == "--quiet") {
             quiet = true;
+        } else if (arg == "--tracker") {
+            tracker_enabled = true;
         } else if (arg == "--mode") {
             if (i + 1 >= args.size()) {
                 return usage_error("--mode needs a value (classical|ai|hybrid)");
@@ -175,19 +188,25 @@ int main(int argc, char** argv) {
     // never a silent degradation.
     PerceptionMode active_mode = requested_mode;
     std::optional<AiBeaconDetectorConfig> active_ai_detector;
+    bool active_tracker_enabled = tracker_enabled;
     std::unique_ptr<DemoSession> session_ptr;
-    if (requested_mode != PerceptionMode::Classical) {
-        active_ai_detector = default_ai_detector_config();
+    if (requested_mode != PerceptionMode::Classical || tracker_enabled) {
+        if (requested_mode != PerceptionMode::Classical) {
+            active_ai_detector = default_ai_detector_config();
+        }
         try {
             session_ptr = std::make_unique<DemoSession>(
-                *scenario, duration_s, requested_mode, active_ai_detector);
+                *scenario, duration_s, requested_mode, active_ai_detector, tracker_enabled);
         } catch (const std::exception& e) {
             std::cerr << "fsoc_demo: WARNING: could not start in --mode " << mode_token
-                      << " (" << e.what() << ")\n"
-                      << "fsoc_demo: falling back to --mode classical (model path: "
-                      << active_ai_detector->model_path << ")\n\n";
+                      << (tracker_enabled ? " --tracker" : "") << " (" << e.what() << ")\n"
+                      << "fsoc_demo: falling back to --mode classical, tracker off"
+                      << (active_ai_detector.has_value() ? " (model path: " + active_ai_detector->model_path + ")"
+                                                          : "")
+                      << "\n\n";
             active_mode = PerceptionMode::Classical;
             active_ai_detector.reset();
+            active_tracker_enabled = false;
         }
     }
     if (!session_ptr) {
@@ -214,6 +233,9 @@ int main(int argc, char** argv) {
               << (active_mode == PerceptionMode::Classical
                       ? "  (validated v1 baseline)"
                       : "  (Stage-3 C++ ONNX inference, models/tiny_beacon_net.onnx)")
+              << "\n"
+              << "tracker  : " << (active_tracker_enabled ? "ENABLED (alpha-beta estimator + temporal gate)"
+                                                            : "disabled")
               << "\n\n";
 
     std::vector<TelemetryRecord> records;
@@ -229,7 +251,9 @@ int main(int argc, char** argv) {
             logger->record(session.last_telemetry());
         }
         if (!quiet && (snapshot.frame_index % kPrintEvery == 0 || session.finished())) {
-            print_status_line(snapshot, session.last_telemetry(), active_mode != PerceptionMode::Classical);
+            print_status_line(
+                snapshot, session.last_telemetry(), active_mode != PerceptionMode::Classical,
+                active_tracker_enabled);
         }
     }
 
