@@ -415,7 +415,7 @@ std::string demo_help_text() {
     help += "                        detector (models/tiny_beacon_net.onnx); falls back to\n";
     help += "                        classical with a warning if the model can't be loaded\n";
     help += "  --duration <seconds>  override the scenario's validated duration (demo knob only)\n";
-    help += "  --csv <path>          write the 34-column telemetry CSV for this run\n";
+    help += "  --csv <path>          write the telemetry CSV for this run\n";
     help += "                        (27 Step-8 fields + 7 Stage-3 perception fields)\n";
     help += "  --quiet               print only the end-of-run summary\n\n";
     help += "Notes:\n";

@@ -53,6 +53,14 @@ trajectory. Running a simulation with or without telemetry yields a bit-identica
 | 32 | `ai_inference_ms` | optional double | ms | AI detector preprocess+forward+decode wall time | present iff `ai_candidate_detected` |
 | 33 | `classical_ai_distance_px` | optional double | px | `‖classical centroid − AI centroid‖`, used against the frozen 8.0 px `agreement_radius_px` | present iff both classical and AI produced a candidate this frame |
 | 34 | `perception_rejection_reason` | enum string | — | `NOT_APPLICABLE` \| `AI_ONLY_UNVERIFIED` \| `DETECTOR_DISAGREEMENT` — meaningful iff `tracking_state == TargetLost` under `HYBRID` (ADR-018) | always |
+| 35 | `tracker_lock_state` | enum string | — | `fsoc::LockState` — `SEARCHING` \| `ACQUIRING` \| `TRACKING` \| `COASTING` \| `LOST` (see `fsoc/target_tracker.hpp`) | always (constant `SEARCHING` when `tracker_enabled` is false) |
+| 36 | `tracker_x_px` | optional double | px | alpha-beta filter position estimate x | present iff `tracker_lock_state` is `ACQUIRING`, `TRACKING`, or `COASTING` |
+| 37 | `tracker_y_px` | optional double | px | alpha-beta filter position estimate y | present under the same condition |
+| 38 | `tracker_vx_px_s` | optional double | px/s | alpha-beta filter velocity estimate x | present under the same condition |
+| 39 | `tracker_vy_px_s` | optional double | px/s | alpha-beta filter velocity estimate y | present under the same condition |
+| 40 | `tracker_confidence` | optional double | — | in `[0,1]`; `1.0` on a fresh accepted measurement, decaying each coasted frame | present under the same condition |
+| 41 | `tracker_is_prediction` | bool | — | `true` iff this frame's tracker position came from prediction (coasting), not a real accepted measurement | always |
+| 42 | `tracker_coast_frames` | size_t | — | consecutive frames currently coasting (`0` when not coasting) | always |
 
 Fields 28-34 are additive (Stage 3, `feat/ai-perception`) and DIAGNOSTIC ONLY — the
 PID never reads them. For every pre-Stage-3 run (and every run using the default
@@ -60,6 +68,17 @@ PID never reads them. For every pre-Stage-3 run (and every run using the default
 `perception_source` mirrors `tracking_state` exactly (`CLASSICAL` iff `Tracking`, `NONE`
 iff `TargetLost`) — a reader that ignores columns 28-34 sees the exact same 27-column
 schema as before.
+
+Fields 35-42 are additive (P0-v2, `TargetTracker`) and DIAGNOSTIC ONLY — see
+`include/fsoc/target_tracker.hpp` for the estimator itself and `is_safe_to_steer()` for
+the one rule that lets a coasted (predicted) position actually reach `result.detection`
+(and therefore the control-facing `detected_x_px`/`detected_y_px`/`tracking_state`
+columns above) during a brief dropout. For every run with `tracker_enabled` at its
+default (`false`), the tracker is never constructed, `tracker_lock_state` is the
+constant string `SEARCHING` for every frame, `tracker_x_px`/`tracker_y_px`/
+`tracker_vx_px_s`/`tracker_vy_px_s`/`tracker_confidence` are always empty, and
+`tracker_is_prediction`/`tracker_coast_frames` are always `0` — a reader that ignores
+columns 35-42 sees the exact same 34-column schema as before.
 
 ## Tracking state
 
@@ -71,11 +90,11 @@ carried by `pan_saturated` / `tilt_saturated`. An `Acquiring` state would be dec
 
 * Written by `fsoc::CsvTelemetryLogger` — synchronous `std::ofstream`, one line per record,
   flushed after every line. No threads, no async queue, no external CSV dependency.
-* Header line = the 34 column names above, comma-separated, in order.
+* Header line = the 42 column names above, comma-separated, in order.
   `CsvTelemetryLogger::column_names()` is the single source of that order (also the stable
   JSON key list for the frontend — `frontend/lib/telemetry/normalize.ts` parses by header
   name, so it is unaffected by columns appended after it last read the file).
-* Every record line has exactly 34 comma-separated fields (empty fields count).
+* Every record line has exactly 42 comma-separated fields (empty fields count).
 * Logs are written to `generated/` (git-ignored); binary/CSV logs are never committed.
 
 ## Benchmark metrics — denominator conventions

@@ -226,10 +226,12 @@ void test_csv_header_deterministic() {  // (13)
     const auto& a = CsvTelemetryLogger::column_names();
     const auto& b = CsvTelemetryLogger::column_names();
     CHECK(a == b);
-    CHECK(a.size() == 34);  // 27 Step-8 core fields + 7 Stage-3 perception fields (additive, appended)
+    // 27 Step-8 core fields + 7 Stage-3 perception fields + 8 P0-v2 tracker fields
+    CHECK(a.size() == 42);
     CHECK(a.front() == "simulation_time_s");
     CHECK(a.at(26) == "tracking_state");         // last of the original 27
-    CHECK(a.back() == "perception_rejection_reason");
+    CHECK(a.at(33) == "perception_rejection_reason");  // last of the Stage-3 additions
+    CHECK(a.back() == "tracker_coast_frames");
 
     const std::filesystem::path p1 = temp_csv("fsoc_step8_hdr1.csv");
     const std::filesystem::path p2 = temp_csv("fsoc_step8_hdr2.csv");
@@ -296,6 +298,22 @@ void test_csv_column_count_and_empty_fields() {  // (14)(15)
     CHECK(full_fields.at(31).empty());          // ai_inference_ms
     CHECK(full_fields.at(32).empty());          // classical_ai_distance_px
     CHECK(full_fields.at(33) == "NOT_APPLICABLE");  // perception_rejection_reason
+
+    // base_result() never enables the tracker (tracker_enabled defaults to
+    // false), so both records show the tracker's untouched default row:
+    // SEARCHING, no position estimate, not a prediction, zero coast frames --
+    // identical for the "full" and "lost" records since the tracker never ran
+    // in either case.
+    CHECK(full_fields.at(34) == "SEARCHING");  // tracker_lock_state
+    CHECK(full_fields.at(35).empty());         // tracker_x_px
+    CHECK(full_fields.at(36).empty());         // tracker_y_px
+    CHECK(full_fields.at(37).empty());         // tracker_vx_px_s
+    CHECK(full_fields.at(38).empty());         // tracker_vy_px_s
+    CHECK(full_fields.at(39).empty());         // tracker_confidence
+    CHECK(full_fields.at(40) == "0");          // tracker_is_prediction
+    CHECK(full_fields.at(41) == "0");          // tracker_coast_frames
+    CHECK(lost_fields.at(34) == "SEARCHING");  // tracker_lock_state
+    CHECK(lost_fields.at(41) == "0");          // tracker_coast_frames
     std::filesystem::remove(p);
 }
 

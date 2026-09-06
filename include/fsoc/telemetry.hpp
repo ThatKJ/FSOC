@@ -103,6 +103,21 @@ struct TelemetryRecord {
     std::optional<double> ai_inference_ms{};                 // present iff a candidate exists
     std::optional<double> classical_ai_distance_px{};        // present iff both classical and AI produced a candidate
     std::string perception_rejection_reason{"NOT_APPLICABLE"};  // meaningful iff tracking_state == TargetLost under Hybrid
+
+    // --- State estimation / temporal gate diagnostics (P0-v2, additive) ---
+    // Mirrors fsoc::TrackedState on SimulationStepResult (see
+    // fsoc/target_tracker.hpp). Always present; DIAGNOSTIC ONLY. When
+    // tracker_enabled is false (default), the tracker never ran this run and
+    // every reader sees the constant "SEARCHING" / absent-position row below
+    // for every frame -- the exact same signature as a pre-tracker run.
+    std::string tracker_lock_state{"SEARCHING"};             // SEARCHING | ACQUIRING | TRACKING | COASTING | LOST
+    std::optional<double> tracker_x_px{};                     // present iff lock_state has a position estimate
+    std::optional<double> tracker_y_px{};                     // (Acquiring, Tracking, or Coasting)
+    std::optional<double> tracker_vx_px_s{};                  // present under the same condition
+    std::optional<double> tracker_vy_px_s{};
+    std::optional<double> tracker_confidence{};                // present under the same condition; in [0,1]
+    bool tracker_is_prediction{false};                          // true iff this frame's position is a coast/predict, not a real measurement
+    std::size_t tracker_coast_frames{0};                        // consecutive frames currently coasting (0 when not coasting)
 };
 
 // Tolerance for the saturation flags (rad/s).
