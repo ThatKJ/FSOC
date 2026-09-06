@@ -53,7 +53,7 @@ export interface EngineRunResult {
  */
 export async function runEngineScenario(
   scenario: ScenarioId,
-  opts: { durationS?: number } = {},
+  opts: { durationS?: number; mode?: "classical" | "ai" | "hybrid"; trackerEnabled?: boolean } = {},
 ): Promise<EngineRunResult> {
   const bin = engineBinaryPath();
   if (!existsSync(bin)) {
@@ -67,10 +67,20 @@ export async function runEngineScenario(
   if (opts.durationS && Number.isFinite(opts.durationS) && opts.durationS > 0) {
     args.push("--duration", String(opts.durationS));
   }
+  if (opts.mode && opts.mode !== "classical") {
+    args.push("--mode", opts.mode);
+  }
+  if (opts.trackerEnabled) {
+    args.push("--tracker");
+  }
 
   try {
+    // cwd MUST be the repo root, not the tmp dir: fsoc_demo resolves its AI
+    // model path ("models/tiny_beacon_net.onnx") relative to its CWD, with no
+    // --model override. --csv already gets an absolute path, so this has no
+    // effect on where the CSV lands.
     await execFileAsync(bin, args, {
-      cwd: dir,
+      cwd: repoRoot(),
       timeout: 30_000,
       maxBuffer: 8 * 1024 * 1024,
     });

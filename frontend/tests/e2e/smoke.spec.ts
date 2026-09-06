@@ -152,6 +152,32 @@ test("invalid scenario API returns 400", async ({ request }) => {
   expect(body.error).toMatch(/unknown scenario/i);
 });
 
+test("invalid perception mode API returns 400", async ({ request }) => {
+  const r = await request.get("/api/simulation/static?mode=not-a-mode");
+  expect(r.status()).toBe(400);
+  const body = await r.json();
+  expect(body.error).toMatch(/mode must be one of/i);
+});
+
+test("engine mode --tracker actually reaches the C++ engine (P0-v2)", async ({ request }) => {
+  const r = await request.get("/api/simulation/static?source=engine&mode=hybrid&tracker=1");
+  // The C++ binary may not be built in every environment this suite runs in;
+  // skip rather than false-fail when the engine genuinely isn't available.
+  if (r.status() !== 200) {
+    test.skip(true, "local C++ engine not available in this environment");
+    return;
+  }
+  const body = await r.json();
+  expect(body.meta.source).toBe("engine");
+  const last = body.frames.at(-1);
+  // Regression guard: the engine subprocess's CWD must resolve the AI
+  // model's relative path -- if it doesn't, fsoc_demo silently falls back to
+  // CLASSICAL and this assertion catches it.
+  expect(last.perception?.mode).toBe("HYBRID");
+  expect(last.tracker).toBeTruthy();
+  expect(["SEARCHING", "ACQUIRING", "TRACKING", "COASTING", "LOST"]).toContain(last.tracker.lockState);
+});
+
 test("no Math.random in application source (simulation state is never faked)", () => {
   // vendor libs (three.js) legitimately use Math.random for UUIDs; scope the
   // guard to OUR code — lib/, components/, app/.

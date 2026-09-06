@@ -84,8 +84,12 @@ function csvToSnapshots(text) {
     aicand: col("ai_candidate_detected"), aiprob: col("ai_presence_probability"),
     aims: col("ai_inference_ms"), caidist: col("classical_ai_distance_px"),
     prej: col("perception_rejection_reason"),
+    tlock: col("tracker_lock_state"), tx: col("tracker_x_px"), ty: col("tracker_y_px"),
+    tvx: col("tracker_vx_px_s"), tvy: col("tracker_vy_px_s"), tconf: col("tracker_confidence"),
+    tpred: col("tracker_is_prediction"), tcoast: col("tracker_coast_frames"),
   };
   const hasPerceptionColumns = c.pmode >= 0;
+  const hasTrackerColumns = c.tlock >= 0;
   const rows = lines.slice(1).filter((l) => l.length > 0).map((l) => l.split(","));
   return rows.map((r) => {
     const stateRaw = String(r[c.st] ?? "").trim();
@@ -130,6 +134,18 @@ function csvToSnapshots(text) {
             aiInferenceMs: optNum(r[c.aims]),
             classicalAiDistancePx: optNum(r[c.caidist]),
             rejectionReason: String(r[c.prej] ?? "NOT_APPLICABLE").trim() || "NOT_APPLICABLE",
+          }
+        : undefined,
+      tracker: hasTrackerColumns
+        ? {
+            lockState: String(r[c.tlock] ?? "SEARCHING").trim() || "SEARCHING",
+            xPx: optNum(r[c.tx]),
+            yPx: optNum(r[c.ty]),
+            vxPxS: optNum(r[c.tvx]),
+            vyPxS: optNum(r[c.tvy]),
+            confidence: optNum(r[c.tconf]),
+            isPrediction: bool01(r[c.tpred]),
+            coastFrames: Math.round(num(r[c.tcoast]) || 0),
           }
         : undefined,
     };

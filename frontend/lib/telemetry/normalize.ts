@@ -47,6 +47,14 @@ export const CSV_COLUMNS = [
   "ai_inference_ms",
   "classical_ai_distance_px",
   "perception_rejection_reason",
+  "tracker_lock_state",
+  "tracker_x_px",
+  "tracker_y_px",
+  "tracker_vx_px_s",
+  "tracker_vy_px_s",
+  "tracker_confidence",
+  "tracker_is_prediction",
+  "tracker_coast_frames",
 ] as const;
 
 /** minimal CSV split — the FSOC telemetry CSV has no quoted / comma-bearing fields */
@@ -113,6 +121,23 @@ export function rowToSnapshot(row: string[], header?: string[]): DemoSnapshot {
       }
     : undefined;
 
+  // P0-v2 tracker columns are additive: absent entirely on older fixtures
+  // recorded before they existed (idx returns -1 for all of them).
+  type TrackerInfo = NonNullable<DemoSnapshot["tracker"]>;
+  const hasTrackerColumns = idx("tracker_lock_state") >= 0;
+  const tracker: TrackerInfo | undefined = hasTrackerColumns
+    ? {
+        lockState: (get("tracker_lock_state")?.trim() || "SEARCHING") as TrackerInfo["lockState"],
+        xPx: optNum(get("tracker_x_px")),
+        yPx: optNum(get("tracker_y_px")),
+        vxPxS: optNum(get("tracker_vx_px_s")),
+        vyPxS: optNum(get("tracker_vy_px_s")),
+        confidence: optNum(get("tracker_confidence")),
+        isPrediction: bool01(get("tracker_is_prediction")),
+        coastFrames: Math.round(num(get("tracker_coast_frames")) || 0),
+      }
+    : undefined;
+
   return {
     simulationTime: num(get("simulation_time_s")),
     frame: Math.round(num(get("frame_index"))),
@@ -157,6 +182,7 @@ export function rowToSnapshot(row: string[], header?: string[]): DemoSnapshot {
     },
     detectionErrorPx: optNum(get("detection_error_px")),
     perception,
+    tracker,
     targetVisible: bool01(get("target_visible")),
   };
 }
