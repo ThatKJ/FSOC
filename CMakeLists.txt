@@ -356,6 +356,11 @@ if(FSOC_OPENCV_AVAILABLE)
     target_link_libraries(stage4_tracker_ablation PRIVATE fsoc::stage4_eval)
     fsoc_set_project_warnings(stage4_tracker_ablation)
     fsoc_enable_sanitizers(stage4_tracker_ablation)
+
+    add_executable(mvp_dynamic_scenarios apps/mvp_dynamic_scenarios.cpp)
+    target_link_libraries(mvp_dynamic_scenarios PRIVATE fsoc::stage4_eval)
+    fsoc_set_project_warnings(mvp_dynamic_scenarios)
+    fsoc_enable_sanitizers(mvp_dynamic_scenarios)
 endif()
 
 if(FSOC_BUILD_TESTS)

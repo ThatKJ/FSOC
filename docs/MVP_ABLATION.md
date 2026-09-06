@@ -1,10 +1,11 @@
 # MVP Ablation: TargetTracker vs. the Stage-4 clutter false-lock weakness
 
 Covers MVP-V2 completion-loop **Phase E** (clutter false-lock investigation), **Phase F**
-(Hybrid V2 policy), and **Phase H** (Classical / Hybrid / Hybrid+estimator ablation). See
-`DECISIONS.md` ADR-019 for the architecture-decision record and `docs/19 §9` for the ADR-018
-deferral this closes. Every number below is measured by a committed, deterministic tool
-(`apps/stage4_tracker_ablation.cpp`) on this development machine — none is estimated.
+(Hybrid V2 policy), **Phase G** (dynamic evaluation scenarios), and **Phase H** (Classical /
+Hybrid / Hybrid+estimator ablation). See `DECISIONS.md` ADR-019 for the architecture-decision
+record and `docs/19 §9` for the ADR-018 deferral this closes. Every number below is measured by
+a committed, deterministic tool (`apps/stage4_tracker_ablation.cpp`,
+`apps/mvp_dynamic_scenarios.cpp`) on this development machine — none is estimated.
 
 ## 1. Starting point (what this investigates)
 
@@ -150,17 +151,94 @@ coverage regression.
   `resolve_perception()` already outputs; it does not yet let a tracker-consistent AI-only
   candidate through the frozen fusion policy itself.
 
-## 6. Recommendation
+## 6. Phase G — dynamic scenarios (target motion, dropout, moving clutter)
+
+The Stage-4 protocol (§4) only ever tests a `StationaryTrajectory` — it never exercises target
+motion, a sudden direction change, an exact-length detection dropout, or a persistently
+(rather than per-frame-randomly) positioned distractor. `apps/mvp_dynamic_scenarios.cpp` is a
+second new, additive evaluation tool (touches no frozen Stage-4 file) that runs 8 new scenarios
+across the same four configs (§2) — reusing the same frozen `BeaconDetector` / `AiBeaconDetector`
+/ `resolve_perception()` / `TargetTracker` / PID, plus two evaluation-only trajectory classes
+(`SuddenDirectionChangeTrajectory`, `BriefDropoutTrajectory`) and a local Gaussian-blob compositor
+for a *moving* (temporally coherent, not per-frame-random) distractor. Scenarios Stage-4 already
+covers (stationary+noise, clutter distractors, blur) are not duplicated; "reacquisition" is
+measured as `mean_reacquisition_time_frames` on every dropout scenario rather than a separate
+case. Reproduce: `./build/release/mvp_dynamic_scenarios --out generated/mvp_dynamic_scenarios`
+(~1 min).
+
+| scenario | config | coverage | `>50px` outliers | max err (px) | RMS (deg) | reacq. mean (frames) |
+|---|---|---|---|---|---|---|
+| CONSTANT_VELOCITY | CLASSICAL | 100.0% | 0 | 0.02 | 0.834 | — |
+| CONSTANT_VELOCITY | CLASSICAL+TRACKER | 99.3% | 0 | 10.08 | 0.841 | 2.0 |
+| SUDDEN_DIRECTION_CHANGE | CLASSICAL | 100.0% | 0 | 0.02 | 0.317 | — |
+| SUDDEN_DIRECTION_CHANGE | CLASSICAL+TRACKER | 99.3% | 0 | 5.26 | 0.320 | 2.0 |
+| DROPOUT_1_FRAME | CLASSICAL | 99.0% | 0 | 0.00 | 0.000 | 1.0 |
+| DROPOUT_2_FRAME | CLASSICAL | 98.0% | 0 | 0.00 | 0.000 | 2.0 |
+| DROPOUT_LONGER (10 frames) | CLASSICAL | 90.0% | 0 | 0.00 | 0.000 | 10.0 |
+| MOVING_DISTRACTOR | CLASSICAL | 100.0% | **65** | 607.8 | 6.526 | — |
+| MOVING_DISTRACTOR | CLASSICAL+TRACKER | 99.0% | **65** | 602.4 | 6.476 | 2.0 |
+| MOVING_DISTRACTOR | HYBRID+TRACKER (V2) | 98.5% | **65** | 599.7 | 6.451 | 3.0 |
+| OVEREXPOSURE_GLARE_PROXY | CLASSICAL | 100.0% | 580 | 456.1 | 5.655 | — |
+| OVEREXPOSURE_GLARE_PROXY | CLASSICAL+TRACKER | 30.1% | 5 | 224.3 | 0.764 | 9.4 |
+| OVEREXPOSURE_GLARE_PROXY | HYBRID | 49.2% | 72 | 406.1 | 4.270 | 2.0 |
+| OVEREXPOSURE_GLARE_PROXY | HYBRID+TRACKER (V2) | 29.8% | **0** | 0.02 | 0.0002 | 9.6 |
+| EDGE_OF_FRAME | CLASSICAL | 100.0% | 0 | 0.02 | 1.561 | — |
+| EDGE_OF_FRAME | CLASSICAL+TRACKER | 99.0% | 0 | 12.10 | 1.595 | 2.0 |
+
+(Full per-config table for every scenario: `generated/mvp_dynamic_scenarios/csv/dynamic_scenarios.csv`.)
+
+**Dynamics work correctly.** Constant velocity and an instantaneous full velocity-vector reversal
+(`SUDDEN_DIRECTION_CHANGE`, +6 to -6 m/s at t=3s) both stay outlier-free with the tracker enabled
+— max transient error after the reversal is 5.3px, well inside `outlier_gate_px` (60px), and the
+tracker recovers within its normal re-acquisition cost. `EDGE_OF_FRAME` reproduces Step-10's own
+`Near-FOV-Edge Acquisition` RMS (1.561°) exactly, now additionally shown stable across
+Classical/Hybrid/tracker configurations.
+
+**Dropout scaling is exactly as designed.** 1- and 2-frame gaps are bridged with a
+2-frame-equivalent reacquisition cost (the extra frame vs. the raw gap length is the tracker's
+own acquisition-confirmation cost, not a defect); the 10-frame gap correctly exceeds
+`max_coast_frames` (2), the tracker declares the track Lost partway through, and reacquires fresh
+once the target reappears (mean reacquisition 6.5 vs. Classical's 10 frames — the tracker
+reacquires *faster* than raw Classical here because Classical's own "reacquisition" is just
+"first frame classical could see it again," while the tracker's coast phase covers the first two
+frames of the gap for free).
+
+**Important, honestly-reported limitation: a temporally coherent moving distractor defeats the
+gate completely.** `MOVING_DISTRACTOR` sweeps a distractor smoothly left-to-right across the
+frame (integrated signal deliberately exceeds the beacon's own, so Classical's
+brightest-connected-component rule genuinely has to choose between them) — every configuration,
+**including Hybrid+Tracker (V2), shows the identical 65 severe outliers.** This is the expected
+and correct limit of a *temporal-consistency* gate: it rejects a candidate that is inconsistent
+with the tracker's own recent motion, but a smoothly moving distractor is, by construction,
+perfectly self-consistent frame-to-frame — the gate has no way to know it is following the wrong
+object. This is a genuine, unresolved gap distinct from Stage-4's clutter (§3-4), where the
+distractor's position is independently re-randomized every frame and therefore *is* temporally
+incoherent. Closing this gap would require an identity/appearance signal (e.g. AI candidate
+class/shape, or expected-brightness-profile consistency) that this MVP does not implement —
+recorded here as a known limitation, not silently avoided.
+
+**Hybrid+Tracker (V2) has a real, distinct advantage over Classical+Tracker: `OVEREXPOSURE_GLARE_PROXY`.**
+Here V2 achieves **zero** severe outliers (RMS 0.0002°) versus Classical+Tracker's 5 — the only
+scenario in this evaluation where V2 clearly beats "Classical + tracker alone," because AI's own
+presence/shape judgement filters the diffuse glare region during acquisition in a way the
+classical detector's brightness-only rule cannot, giving the tracker a cleaner signal to lock
+onto from the start.
+
+## 7. Recommendation
 
 Enable the tracker (`tracker_enabled = true`) whenever pointing-error safety matters more than
-raw coverage — the two adversarial Stage-4 scenarios are a reasonable proxy for "clutter is
-plausibly present." Leave it off (current default) for the common/clean case, where it adds a
-small, one-time acquisition-ramp cost for zero benefit. For the golden demo (`docs/17_DEMO_FREEZE.md`
-successor), this maps naturally onto a disturbance-scenario toggle: NORMAL runs classical
-default; a CLUTTER disturbance is the natural place to demonstrate Hybrid V2 visibly
-recovering from a false lock rather than steering into one.
+raw coverage — the two adversarial Stage-4 scenarios (and `OVEREXPOSURE_GLARE_PROXY`, §6) are a
+reasonable proxy for "clutter is plausibly present, and it moves/relocates randomly frame to
+frame." Leave it off (current default) for the common/clean case, where it adds a small,
+one-time acquisition-ramp cost for zero benefit. Do NOT present this as a general clutter/spoof
+defense: §6 shows a **temporally coherent (smoothly moving) distractor defeats it completely** —
+the gate specifically neutralizes spatially/temporally *incoherent* false candidates, not any
+false candidate whatsoever. For the golden demo (`docs/17_DEMO_FREEZE.md` successor), this maps
+naturally onto a disturbance-scenario toggle: NORMAL runs classical default; a CLUTTER
+disturbance (random-position distractor, matching Stage-4's actual weakness) is the natural place
+to demonstrate Hybrid V2 visibly recovering from a false lock rather than steering into one.
 
-## 7. Ablation A/B/C (ties to a canonical estimator/prediction contribution, Phase H)
+## 8. Ablation A/B/C (ties to a canonical estimator/prediction contribution, Phase H)
 
 Restated against the phase-H framing (does adding the estimator/prediction layer on top of
 Hybrid actually help, isolated from the other two variables):
