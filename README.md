@@ -262,17 +262,48 @@ and ADR-015/016/017/018 in `DECISIONS.md` for the full design history.
 - **Measured, unflattering-where-true evaluation**, not marketing numbers.
   `stage4_evaluation` (`docs/21_AI_STAGE4_EVALUATION_PROTOCOL.md`) scores Classical vs.
   AI vs. Hybrid across 11 deterministic degraded scenarios. Headline finding: Hybrid
-  reduces severe closed-loop wrong-lock outliers by ~20% vs. Classical alone, but does
+  alone reduces severe closed-loop wrong-lock outliers by ~20% vs. Classical, but does
   **not** fix Classical's own bright-clutter false-lock vulnerability (44.9% aggregate
-  false-positive rate) — full numbers and the caveats discovered while producing them
-  are in `docs/MVP_METRICS.md`.
+  common-frame false-positive rate) unaided — full numbers and the caveats discovered
+  while producing them are in `docs/MVP_METRICS.md`.
 - **Reachable from the actual demo, not just from unit tests.**
   `fsoc_demo <scenario> --mode classical|ai|hybrid` runs the same validated closed loop
   with AI/Hybrid perception live; falls back to classical with a visible warning if the
-  ONNX model can't be loaded (Phase-7-style failure handling, not a crash). The 27-column
-  Step-8 telemetry CSV gained 7 additive perception columns (34 total, header-driven —
-  old readers are unaffected); Mission Control's telemetry rail shows the live
-  mode/source/AI-confidence/rejection-reason.
+  ONNX model can't be loaded (Phase-7-style failure handling, not a crash). Mission
+  Control's telemetry rail shows the live mode/source/AI-confidence/rejection-reason.
+
+## State estimation + clutter mitigation (P0-v2) — measured, not just implemented
+
+Additive, post-Stage-4 work, still on `feat/ai-perception`. Closes the two gaps the AI
+Perception section above states plainly (no motion filter; Hybrid alone doesn't fix
+Classical's clutter false-lock): `fsoc::TargetTracker`, a minimal alpha-beta (g-h) state
+estimator with a temporal-consistency gate — **not** a Kalman/UKF, a deliberate choice
+(`include/fsoc/target_tracker.hpp`). Additive and default-off (`tracker_enabled = false`
+/ `fsoc_demo --tracker`); every seam is proven bit-identical when disabled by a
+dedicated regression test.
+
+- **Root cause found and fixed, not guessed.** Classical's clutter vulnerability traced
+  to a bad-acquisition mechanism: 3 consecutive detections confirmed a track even when
+  they disagreed spatially. Fixed in the estimator's acquisition logic
+  (`DECISIONS.md` ADR-019).
+- **Measured mitigation** (`docs/MVP_ABLATION.md`, `stage4_tracker_ablation`, full frozen
+  Stage-4 protocol, 22,000 frames/config): severe (>50px) closed-loop outliers fall from
+  2,240 (Classical) / 1,808 (Hybrid) to 12 / 9 — a **99.5% reduction** — at a real,
+  disclosed coverage cost (~20 points). The intrinsic 44.9% single-frame FPR is
+  unchanged (unfixable without touching the frozen classical detector algorithm).
+- **A real, disclosed limit, not hidden**: a *temporally coherent* (smoothly moving)
+  distractor defeats this mitigation completely (`docs/MVP_ABLATION.md §6`,
+  `mvp_dynamic_scenarios`) — the gate rejects spatially/temporally incoherent
+  candidates, not any adversarial one.
+- **5 named, deterministic demo presets** — `fsoc_demo normal|noise|occlusion|clutter|reacquisition`
+  (`docs/MVP_GOLDEN_DEMO.md`) — each a self-contained, reproducible condition tied to a
+  specific measured finding above.
+- **Full latency budget measured** (`docs/MVP_METRICS.md §5`, `mvp_latency_budget`):
+  every configuration, including Hybrid+Tracker, fits inside the 20 ms / 50 Hz budget
+  at P95 on this development machine (not a hardware claim).
+- The 27-column Step-8 telemetry CSV now carries 42 columns total (7 Stage-3 perception
+  + 8 P0-v2 tracker fields, both additive and header-driven — old readers unaffected);
+  Mission Control's telemetry rail gained a live "STATE ESTIMATOR" panel.
 
 ## macOS quick start
 
@@ -296,12 +327,17 @@ ctest --preset debug
 ./build/debug/step10_validation_smoke    # baseline acceptance; writes generated/step10/
 ./build/debug/fsoc_demo sinusoidal       # demo runner: static|sinusoidal|loss|open|closed
 ./build/debug/fsoc_demo static --mode hybrid   # same demo, live AI + Safe Hybrid perception
+./build/debug/fsoc_demo static --mode hybrid --tracker  # + P0-v2 state estimator (Hybrid V2)
+./build/debug/fsoc_demo clutter          # named disturbance preset: normal|noise|occlusion|clutter|reacquisition
 make demo                                # reproducible: validation + demos + visualization
 
 # AI perception (requires the committed models/tiny_beacon_net.onnx, already in the repo)
 ./build/debug/ai_inference_benchmark             # C++ ONNX inference latency, this machine
 cmake --preset release && cmake --build --preset release
 ./build/release/stage4_evaluation --out generated/ai_stage4   # full frozen-protocol eval, ~10-15 min
+./build/release/stage4_tracker_ablation --out generated/ai_stage4_ablation  # P0-v2 clutter mitigation, ~15 min
+./build/release/mvp_dynamic_scenarios --out generated/mvp_dynamic_scenarios # velocity/dropout/moving-clutter scenarios
+./build/release/mvp_latency_budget                                          # full latency budget, seconds
 
 # Mission Control frontend (Next.js; reads real fsoc_demo CSV output, never fakes telemetry)
 cd frontend && npm install
@@ -330,10 +366,13 @@ hardware step is replacing `SyntheticCameraRenderer` with a real frame grabber a
 `PanTiltCamera::step()`'s actuator model with a real servo/motor driver, without touching
 the detector, PID, or `SimulationRunner` step order. Known MVP-stage limitations: AI
 recall is intentionally low (~16-40% depending on scenario) rather than over-confident;
-Safe Hybrid does not yet correct Classical's own bright-clutter false-lock behavior
-(`docs/MVP_METRICS.md` §2); there is no motion-prediction/state-estimation filter beyond
-the frozen P-only PID (kp=12, ki=0, kd=0) — a deliberate, documented, currently-sufficient
-choice (`docs/16_BASELINE_ACCEPTANCE.md`), not an oversight.
+a minimal alpha-beta state estimator now exists and measurably mitigates (does not
+solve) Classical's clutter false-lock behavior for spatially/temporally *incoherent*
+candidates — a *temporally coherent* (smoothly moving) distractor still defeats it
+completely, a real, disclosed, currently-unresolved gap (`docs/MVP_ABLATION.md`); the
+estimator is a P-dominant plant + alpha-beta filter (kp=12, ki=0, kd=0), not a Kalman/UKF
+— a deliberate, documented, currently-sufficient choice
+(`docs/16_BASELINE_ACCEPTANCE.md`, `include/fsoc/target_tracker.hpp`), not an oversight.
 
 ## Repository layout
 

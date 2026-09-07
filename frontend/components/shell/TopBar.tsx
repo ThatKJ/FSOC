@@ -26,6 +26,12 @@ export function TopBar() {
         <span className="border-l border-outline-variant pl-margin-md font-label-xs text-label-xs uppercase tracking-tight text-on-surface-variant">
           SIH26169
         </span>
+        <span
+          className="border-l border-outline-variant pl-margin-md font-label-xs text-label-xs uppercase tracking-tight text-tertiary"
+          title="Every value on this screen comes from the deterministic C++ simulation (SyntheticCameraRenderer) — no physical camera, beacon, or pan/tilt hardware is connected."
+        >
+          Simulation
+        </span>
       </div>
 
       <div className="flex flex-1 justify-center">
@@ -47,7 +53,7 @@ export function TopBar() {
             )}
           />
           <span className="font-label-xs text-label-xs uppercase text-on-surface">
-            {uplinkOk ? "Uplink Active" : "Link Fault"}
+            {uplinkOk ? "Sim Feed Active" : "Sim Feed Fault"}
           </span>
         </div>
         <div className="ml-margin-sm flex h-8 w-8 items-center justify-center rounded-full bg-primary">
