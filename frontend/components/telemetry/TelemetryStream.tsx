@@ -8,7 +8,7 @@ import { cn } from "@/lib/cn";
 
 /** Mission Control right rail — "Telemetry Stream". All values from the current C++ frame. */
 export function TelemetryStream({ className }: { className?: string }) {
-  const { current, meta, runState, pause, reset, simTime, playing, trackerEnabled } = useSimulation();
+  const { current, meta, runState, pause, reset, simTime, playing } = useSimulation();
   const lost = current.trackingState === "TARGET_LOST";
   const t = current.tracking;
   const c = current.camera;
@@ -94,7 +94,7 @@ export function TelemetryStream({ className }: { className?: string }) {
           </div>
         )}
 
-        {trackerEnabled && current.tracker && (
+        {current.tracker && current.tracker.lockState !== "SEARCHING" && (
           <div className="flex flex-col gap-margin-sm bg-surface-container-low p-margin-md">
             <span className="mb-unit font-label-xs text-label-xs text-on-surface-variant">
               STATE ESTIMATOR (P0-v2)
