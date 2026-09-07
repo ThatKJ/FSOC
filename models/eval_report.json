@@ -1,0 +1,103 @@
+{
+  "checkpoint": "models/checkpoints/best.pt",
+  "presence_threshold": 0.95,
+  "param_count": 27282,
+  "test_overall": {
+    "n": 1200,
+    "n_pos": 900,
+    "n_neg": 300,
+    "detection_rate": 0.40444444444444444,
+    "fp_rate": 0.013333333333333334,
+    "centroid_mae_px": 8.698761660329343
+  },
+  "test_strata": {
+    "clean_easy (difficulty<0.2)": {
+      "n": 202,
+      "n_pos": 190,
+      "n_neg": 12,
+      "detection_rate": 0.47368421052631576,
+      "fp_rate": 0.0,
+      "centroid_mae_px": 1.8737456412778961
+    },
+    "mid (0.2<=difficulty<0.5)": {
+      "n": 812,
+      "n_pos": 592,
+      "n_neg": 220,
+      "detection_rate": 0.39864864864864863,
+      "fp_rate": 0.00909090909090909,
+      "centroid_mae_px": 10.887623113043354
+    },
+    "hard (difficulty>=0.5)": {
+      "n": 186,
+      "n_pos": 118,
+      "n_neg": 68,
+      "detection_rate": 0.3220338983050847,
+      "fp_rate": 0.029411764705882353,
+      "centroid_mae_px": 11.269291630701014
+    },
+    "low_snr (snr<15)": {
+      "n": 318,
+      "n_pos": 18,
+      "n_neg": 300,
+      "detection_rate": 0.1111111111111111,
+      "fp_rate": 0.013333333333333334,
+      "centroid_mae_px": 2.6757673025131226
+    },
+    "bright_distractor": {
+      "n": 356,
+      "n_pos": 265,
+      "n_neg": 91,
+      "detection_rate": 0.4037735849056604,
+      "fp_rate": 0.02197802197802198,
+      "centroid_mae_px": 8.72236628374346
+    },
+    "optical_none": {
+      "n": 544,
+      "n_pos": 419,
+      "n_neg": 125,
+      "detection_rate": 0.4128878281622912,
+      "fp_rate": 0.0,
+      "centroid_mae_px": 7.640068455173962
+    },
+    "optical_gaussian_blur": {
+      "n": 291,
+      "n_pos": 216,
+      "n_neg": 75,
+      "detection_rate": 0.35648148148148145,
+      "fp_rate": 0.013333333333333334,
+      "centroid_mae_px": 15.390930826594303
+    },
+    "optical_defocus": {
+      "n": 193,
+      "n_pos": 140,
+      "n_neg": 53,
+      "detection_rate": 0.42142857142857143,
+      "fp_rate": 0.018867924528301886,
+      "centroid_mae_px": 6.212084296396223
+    },
+    "optical_motion_blur": {
+      "n": 172,
+      "n_pos": 125,
+      "n_neg": 47,
+      "detection_rate": 0.44,
+      "fp_rate": 0.0425531914893617,
+      "centroid_mae_px": 5.327322808720849
+    },
+    "target_absent": {
+      "n": 300,
+      "n_pos": 0,
+      "n_neg": 300,
+      "detection_rate": NaN,
+      "fp_rate": 0.013333333333333334,
+      "centroid_mae_px": NaN
+    }
+  },
+  "python_latency": {
+    "mean_ms": 3.160964553098893,
+    "median_ms": 3.0060835015319753,
+    "p95_ms": 3.789040200717864,
+    "max_ms": 6.186749997141305,
+    "throughput_fps": 316.35913127201536,
+    "note": "torch CPU single-thread; not the deployed OpenCV-DNN C++ latency"
+  }
+}

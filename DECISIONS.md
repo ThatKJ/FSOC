@@ -362,3 +362,271 @@ frontend without touching a single validated algorithm.
   `compute_benchmark_metrics`; no metrics math is duplicated. `make demo` /
   `scripts/run_baseline_demo.sh` is the reproducible bundle (`set -euo pipefail`, no
   destructive git ops, no hardcoded paths).
+
+## ADR-015 — V2 AI PERCEPTION: a learned detector behind the frozen `BeaconDetection` contract
+**Status:** Accepted (phase in progress on `feat/ai-perception`; `v1_baseline` untouched)
+
+The validated v1 pipeline (`threshold → connected components → brightest component →
+intensity-weighted centroid`) is transparent and sub-pixel-accurate on clean Gaussian
+beacons, and it stays the frozen baseline. Its real weakness is *selection*: it has no
+model of which bright region is the beacon, so under low SNR, star clutter, hot pixels,
+blur/defocus, background gradients, or a distractor brighter than the target it locks onto
+the wrong blob or fabricates a detection. V2 adds a learned perception stack that is robust
+in those regimes, **without touching the controller**.
+
+- **Scope is perception only.** The AI produces the *same* `std::optional<BeaconDetection>`
+  the classical detector produces. `compute_tracking_error`, the PID law, the baseline
+  gains (kp = 12, ki = 0, kd = 0), `PanTiltCamera`, the actuator limits, the frozen
+  `SimulationRunner::step()` order, and the Step-10 acceptance thresholds are all unchanged.
+  No UKF / MPC / temporal model / trajectory prediction in this phase (those are ADR-0xx
+  future work, documented in `docs/19`).
+- **Not YOLO.** The target is a sub-pixel point source; bounding-box detection is the wrong
+  abstraction. `TinyBeaconNet` is a lightweight fully-convolutional **heatmap-localization**
+  network: single-channel input → (presence logit, location heatmap) → soft-argmax
+  sub-pixel centroid. Design budget < 1M params (actual ≈ 50k); real-time CPU inference.
+- **Pixels only at inference.** The learned detector receives a `cv::Mat` and nothing else
+  — never `TargetState`, trajectory, projected truth, `TrackingError`, or controller state.
+  Ground-truth labels (`target_present`, `x_px`, `y_px`) exist only in dataset generation,
+  training, and evaluation.
+- **Runtime stays C++.** Python (PyTorch) is permitted *offline only* for dataset tooling
+  and training, reversing ADR-001's Python ban for that narrow purpose (AI brief §5). The
+  trained model is exported to **ONNX** and run in C++ through **OpenCV 5 `dnn`** (already
+  present in the toolchain). No Python runtime, server, or glue in the closed loop / demo.
+- **Additive build + files only.** New libraries `fsoc_ai_datagen` (synthetic frame
+  synthesizer for datasets + AI eval), later `fsoc_ai_perception` (ONNX detector + hybrid)
+  and `fsoc_ai_validation` (new eval suite). New app `generate_ai_dataset`. `fsoc_core`
+  stays OpenCV-free; `fsoc_ai_datagen` links `fsoc::core` + OpenCV core/imgproc and — like
+  `fsoc_perception` — must not depend on `fsoc_render`. Datasets and AI eval artifacts are
+  git-ignored under `generated/`; the small `models/tiny_beacon_net.onnx` is committed.
+- **Synthetic-domain limitation is stated, not hidden.** The first model is trained purely
+  on domain-randomized virtual-camera imagery. No real sensor data, no atmospheric dataset,
+  no flight heritage — `docs/19` and `models/MODEL_CARD.md` say so explicitly.
+
+## ADR-016 — Perception is made pluggable via an additive strategy seam, default = Classical
+**Status:** Accepted (integration lands in a later stage of this phase)
+
+The AI must participate in real closed-loop tracking, not just a static screenshot demo, so
+`SimulationRunner` needs to be able to run classical / AI / hybrid perception. Two options
+were considered:
+
+1. **Fork a post-v1 runner** that copies the loop and swaps the detector. Rejected: it
+   duplicates the frozen `step()` ordering and target-loss policy, and any future baseline
+   fix would have to be mirrored in two places — exactly the "god-loop / copy-paste"
+   failure the architecture forbids.
+2. **Additive strategy seam in the existing runner** (chosen). Introduce
+   `enum class PerceptionMode { Classical, AI, Hybrid }` and a narrow
+   `PerceptionStrategy` interface whose single job is `cv::Mat → std::optional<BeaconDetection>`
+   (+ diagnostics). `SimulationRunnerConfig` gains a `PerceptionMode` field that **defaults
+   to `Classical`**; in that mode the runner calls the existing `BeaconDetector` exactly as
+   today. `step()` order, the clock, the loss policy, and camera stepping are unchanged.
+
+Guarantees for option 2:
+- **Bit-identical default.** A regression test runs every Step-10 / demo scenario through
+  the seam in `Classical` mode and asserts a field-identical `SimulationStepResult`
+  sequence versus a bare v1 `SimulationRunner`. Step-10 must still end
+  `STEP 10 BASELINE ACCEPTANCE: PASS`.
+- **No truth to detectors.** The strategy is handed only the `cv::Mat`; the seam sits at
+  the exact point the runner already calls `detector_.detect(frame)`.
+- **Diagnostics stay out of control.** AI confidence / perception source / inference-ms /
+  classical-vs-AI distance are recorded as telemetry-only fields (`PerceptionSource` is a
+  diagnostic enum, never a `TrackingState` / `DemoRunState`). The controller never reads
+  neural confidence.
+- **Hybrid policy is config-driven and documented** (agreement radius, AI confidence
+  threshold, high-confidence override) — see `docs/19_AI_PERCEPTION_ARCHITECTURE.md`.
+
+**Note (ADR-018).** The confidence-override escape hatch sketched above — AI confidence
+resolving classical/AI disagreement, or gating an AI-only detection — was retired after
+Stage-2 training evidence showed confidence does not separate correct from wrong accepted
+detections. See ADR-018 for the Safe Hybrid policy that replaces it. This ADR is kept
+as-written for history; it is not silently rewritten.
+
+## ADR-017 — Stage-2 training fix: foreground-weighted heatmap loss + max-pool presence head
+**Status:** Accepted (Stage 2 of `feat/ai-perception`; offline training toolchain only — no
+C++ runtime, no `v1_baseline`, no closed-loop code touched)
+
+The first real training run of `TinyBeaconNet` (the Stage-1 config: plain
+`MSE(sigmoid(heatmap_logit), gaussian_heatmap)` with `λ_h = 1`, and a global-**average**-pool
+presence head) **stalled**: after ~4 epochs the presence head sat at false-positive rate
+≈ 0.4–0.5 and the centroid MAE plateaued at ~40–45 px. A `git`-clean diagnostic (kept in the
+Stage-2 evidence, not committed) established:
+
+- **Pipeline is correct.** On a fixed 96-sample subset the presence head reaches 100 %
+  accuracy and the median centroid error is ~2 px — labels, coordinate maps (`common.py`
+  round-trip is exact), `/255` normalization, output shapes and gradient flow are all fine.
+- **Root cause 1 — the heatmap loss has almost no gradient.** The 60×80 target grid is
+  ~97 % background (the σ = 1.75-cell Gaussian covers ~120 of 4800 cells). Unweighted MSE on
+  the sigmoid surface is minimised by predicting a near-flat ~0 map (MSE ≈ 1.4e-3), and the
+  handful of foreground cells cannot pull the surface into a peak. `docs/20 §7`'s assumption
+  "at 60×80 there is no severe dense class imbalance" was wrong. Raising `λ_h` alone does
+  not help (it scales an already-flat gradient). **Fix:** a foreground-weighted MSE — each
+  cell with `target > 0` gets weight `1 + pos_weight` (`pos_weight = 80` default, new
+  `--heatmap-pos-weight` CLI flag; `0` recovers the old loss). On the probe this drops
+  centroid MAE 42 → 15 px and p90 182 → 6 px.
+- **Root cause 2 — global-average pool washes out a point source.** The beacon occupies
+  << 1 cell of the trunk feature map; averaging over ~4800 cells destroys the "is there a
+  peak anywhere" signal the presence head needs. **Fix:** `nn.AdaptiveAvgPool2d(1)` →
+  `nn.AdaptiveMaxPool2d(1)` in `presence_head`. Combined with the weighted loss the probe
+  reaches MAE 12 px / p90 4.6 px / 4 % of positives > 10 px, presence 100 %.
+- **Rejected:** CornerNet-style penalty-reduced pixel BCE on the soft heatmap — it broke
+  the presence head on the probe (acc 0.82, a negative at prob 0.92). Not worth the extra
+  loss complexity when weighted MSE works.
+
+Scope of the change: `tools/ai/model.py` (pool swap — ONNX I/O contract unchanged: input
+`[N,1,240,320]`, outputs `[N,1]` + `[N,1,60,80]`, opset 12; `MaxPool` is OpenCV-DNN-safe),
+`tools/ai/train_beacon_net.py` (weighted loss + flag; checkpoint criterion is now
+`min val_total = λ_p·BCE(presence) + λ_h·weightedMSE(heatmap)` — the training objective),
+`tools/ai/export_onnx.py` (`dynamo=False` pins the legacy opset-12 exporter under
+torch ≥ 2.9), and the docs below. `docs/19 §2`, `docs/20 §7/§9` updated in the same change.
+A runnable regression, `tools/ai/selfcheck.py`, asserts a short run drives presence
+accuracy ≥ 0.95 and centroid median ≤ 5 px / p90 ≤ 15 px on a real subset. The dataset,
+the frozen `common.py` numeric contract, and every C++ module are untouched.
+
+**Coda — Stage-2 training ceiling (kept, not worked around).** The ADR-017 fixes let
+`TinyBeaconNet` learn a real beacon-PSF signature: with the calibrated safe threshold
+(0.95, val-only, `docs/20 §10`) the model localizes the beacons it commits to at
+**median 1.7 px (97.5 % ≤ 10 px)** with a ~1 % false-lock rate on the untouched test
+split — including under star clutter, a brighter distractor, and blur. But its **recall
+is ~40 %**: the presence head cannot cleanly separate "beacon present" from
+"clutter only" (val ROC-AUC ≈ 0.82), and the model deliberately **abstains** on
+low-SNR / dim / edge-clipped beacons rather than lock onto the wrong blob. Ten
+documented training variants — plain/weighted MSE, weighted/plain BCE and a
+0.5·MSE+0.5·BCE heatmap loss; channel width 16 / 24 / 32; stem stride 1 vs 2 and a
+double-conv stem; a global-max context head (`torch.amax` + 1×1 conv + concat) —
+**all plateau at the same point** (frac ≤ 10 px ≈ 0.74 over all positives, presence
+AUC ≈ 0.82). A ~27 k-param single-frame CNN cannot reliably out-select a distractor
+rendered brighter than the target with an overlapping σ range (30 % of positives, by
+dataset design — `docs/20 §3`, the intended hard case). This is **reported, not tuned
+around**: recall is expected from the Stage-3 hybrid policy (the classical detector)
+and, longer-term, the Phase-2 spatio-temporal detector (`docs/19 §8`). No easier test
+set was generated; the frozen threshold was chosen on val before test was scored.
+
+## ADR-018 — Post-Stage-2 safety revision: AI is candidate perception, not independent control authority
+**Status:** Accepted (documentation / architecture-decision only — Stage 3 implementation has
+**not** started; `v1_baseline`, the PID, Step-10, and the trained model are untouched)
+
+ADR-016 fixed the perception *seam* (additive `PerceptionMode`, default `Classical`,
+bit-identical regression) but left the Hybrid arbitration policy provisional, including a
+"high-confidence AI can override classical / resolve disagreement" escape hatch pending real
+training results. Stage-2 training + evaluation (`docs/20 §10`, `models/stage2_test_report.json`)
+now supplies those results, and they invalidate that escape hatch.
+
+**Original assumption (ADR-016 draft policy).** High AI presence confidence could be used to
+trust an AI-only detection, or to let AI override the classical centroid on disagreement
+(`confidence ≥ high_confidence_threshold`, draft default 0.90).
+
+**Stage-2 evidence that disproves it** (frozen checkpoint epoch 9, frozen presence threshold
+0.95, untouched test split, n = 1200):
+- confidence does **not** separate correct from incorrect *accepted* detections — mean peak
+  confidence on correct (≤ 10 px) detections ≈ **0.972**, on wrong (> 25 px) detections ≈
+  **0.965**: materially overlapping distributions, not separable by any confidence cut;
+- one accepted detection at presence probability ≈ **0.999** ("very high confidence") has a
+  centroid error of ≈ **630.99 px** — a wrong-blob lock, not a near-miss (`test_000821`,
+  `generated/ai_stage2/evidence/heatmaps/FAILURE_wrong_blob__test_000821.png`);
+- standalone AI recall at the frozen safe threshold is only ≈ **40.44 %** (test precision
+  98.91 %, FPR 1.33 %) — the model itself already withholds ~60 % of judgements as unreliable
+  rather than guess; accepting an *unconfirmed* AI-only candidate would undo that caution;
+- when AI **does** agree with an independently-derived candidate, localization is excellent
+  (median ≈ **1.71 px**, P95 ≈ **5.66 px**) — the network's geometry/precision is not in
+  question, only its unaccompanied identity judgement.
+
+**Decision — the Safe Hybrid policy** (full table: `docs/19 §5`):
+
+1. **Classical + AI agree** (≤ `agreement_radius_px`) → **accept**; control-facing centroid =
+   **classical** (superior clean sub-pixel precision); diagnostic source `HybridAgreement`.
+2. **Classical only** → **accept classical**; diagnostic source `Classical`.
+3. **AI only** → **no control authority.** The AI candidate (centroid, confidence) is kept as
+   diagnostic telemetry only; control-facing result is `std::nullopt`; diagnostic rejection
+   reason `AiOnlyUnverified`. Not because the candidate is necessarily wrong — because a single
+   frame gives no way to confirm it is right.
+4. **Classical + AI disagree** (> `agreement_radius_px`) → **reject, unconditionally.** No
+   averaging, no brightness tiebreak, no confidence override — the `high_confidence_threshold`
+   escape hatch from the ADR-016 draft is **retired**. Control-facing result `std::nullopt`;
+   diagnostic rejection reason `DetectorDisagreement`. A momentary `TargetLost` is strictly
+   safer than a ~600 px commanded slew toward the wrong optical source.
+5. **Neither detects** → `std::nullopt`; diagnostic source `None` (unchanged from ADR-016).
+
+**Agreement radius.** `agreement_radius_px` is frozen at an initial Stage-3 engineering default
+of **8.0 px** — explicitly **not** an ML confidence threshold, but the source-space size of one
+heatmap cell (`INPUT_STRIDE = 8`, confirmed against `tools/ai/common.py` — 640/80 = 480/60 = 8),
+sized to absorb ordinary heatmap-grid quantization and the model's own accepted-detection error
+(median 1.71 px, P95 5.66 px) without letting a large disagreement through. Not to be tuned
+against future Stage-4 closed-loop results.
+
+**Consequence.** Under `PerceptionMode::Hybrid`, `PerceptionSource::AI` is **never emitted** —
+AI never independently supplies the control-facing centroid. `PerceptionMode::AI` (explicit,
+non-default, diagnostic/benchmark mode) is **unaffected** by this ADR: there, the thresholded
+AI candidate may be exposed as the detector's own output for evaluation, because that mode's
+job is to characterise the network, not to command the gimbal. Default production/demo
+perception remains `Classical` (ADR-016) until further validation says otherwise. Stage 3
+prioritizes safety and explainability over maximizing AI control authority.
+
+**Deferred, not abandoned — the future temporal gate.** AI-only reacquisition may be safely
+reconsidered once a runtime motion-consistency gate exists: previous accepted track history +
+current AI candidate + a consistency check, decided from **runtime observation history only**
+— never `TargetState` truth, the exact simulated `Projection`, trajectory truth, future target
+position, or any diagnostic truth-error field (the ADR-004 ground-truth boundary applies to
+this gate exactly as it does to the classical/AI detectors). This is the proper mechanism for
+resolving single-frame target-identity ambiguity — documented in `docs/19 §9` for a later
+phase; **not implemented, not scheduled as Stage 3.**
+
+**Scope of this ADR.** Documentation / architecture-decision only. No C++ written, no Python
+training code touched, no model retrained, `v1_baseline` / PID / Step-10 gates untouched. Stage
+3 has not started.
+
+## ADR-019 — P0-v2: minimal state estimator implements the ADR-018 §9 temporal gate; Hybrid V2 = Hybrid + tracker
+
+**Status:** Accepted and implemented (`fsoc::TargetTracker`, `include/fsoc/target_tracker.hpp`),
+additive and default-off (`tracker_enabled = false`); `v1_baseline`, PID gains, the classical
+detector algorithm, and `resolve_perception()` itself are all untouched.
+
+ADR-018 §9 (`docs/19 §9`) documented — but explicitly deferred — a future runtime
+motion-consistency gate: "previous accepted track + current candidate + a consistency check,
+decided from runtime observation history only." The MVP-V2 completion pass required a minimal
+state estimator (Phase B) and, separately, a fix for the clutter false-lock weakness Stage-4
+measured (`docs/MVP_METRICS.md §2`: 44.9% common-frame FPR, 2,240 severe closed-loop outliers
+`>50px` for Classical). Building the estimator as an alpha-beta (g-h) filter with a temporal
+outlier gate (`TargetTracker::update`, `outlier_gate_px`) directly IS the ADR-018 §9 gate — this
+ADR records that the prerequisite it named now exists, tested, and measured.
+
+**What was NOT changed.** `resolve_perception()` (ADR-018's fusion policy: agreement / classical
+/ AI-only-rejected / disagreement-rejected / none) is byte-for-byte unchanged. The classical
+detector algorithm is unchanged. The tracker is a NEW, separate, purely additive stage layered
+**after** `resolve_perception()` — exactly the seam ADR-016 established for `PerceptionMode`
+itself: default off, bit-identical when disabled (regression-tested in both
+`tests/step7_tests.cpp` and `tests/stage4_determinism_tests.cpp`).
+
+**Root cause found (not assumed).** An early version of this gate, evaluated empirically via
+the new `stage4_tracker_ablation` tool (`docs/MVP_ABLATION.md`), showed the tracker could make
+outcomes *worse* on Stage-4's `BrightDistractor` scenario: `TargetTracker`'s original acquisition
+logic confirmed `Acquiring -> Tracking` after N consecutive measurements regardless of whether
+they agreed with each other. Because Stage-4's distractor is placed at a uniformly random
+position, independent of the beacon, and re-rolled every frame (`stage4_degradation.cpp
+apply_clutter`), a bad acquisition could confirm a stable lock on 3 mutually inconsistent
+clutter positions just as readily as 3 consistent real-beacon ones — and once "confirmed," the
+established-track outlier gate then rejected the *real* beacon as the outlier. Fix: acquisition
+now also checks each new candidate against `outlier_gate_px`; an inconsistent candidate restarts
+acquisition fresh rather than counting toward confirmation (`TargetTracker::begin_acquisition`).
+
+**Hybrid V2 — the combined policy.** "Hybrid V2" is not a new `PerceptionMode` value (ADR-018's
+enum stays frozen) — it is `PerceptionMode::Hybrid` with the tracker enabled downstream
+(`SimulationRunnerConfig::tracker_enabled = true`, or the equivalent optional parameter on
+`stage4::run_closed_loop_scenario_mode_seed`). Measured over the full frozen Stage-4 closed-loop
+protocol (11 scenarios x 5 seeds x 8s @ 50Hz, `docs/MVP_ABLATION.md`): severe (`>50px`) control
+outliers fall from 1,808 (Hybrid) to 9 (Hybrid+Tracker) — a 99.5% reduction — at a coverage cost
+of roughly 20 percentage points (97.35% -> 77.05% accepted-detection fraction), concentrated
+almost entirely in the two adversarial-clutter scenarios; the 9 non-adversarial scenarios lose
+only the ~0.5-point acquisition-ramp cost with zero change in outlier counts.
+
+**Deferred, still not implemented — AI-only reacquisition.** ADR-018 case 3 (AI-only candidate,
+no control authority) is UNCHANGED by this ADR. The gate built here filters whatever
+`resolve_perception()` already outputs; it does not yet let a tracker-consistent AI-only
+candidate through `resolve_perception()` itself when Classical produces nothing. That specific
+extension — described precisely in `docs/19 §9` — is now technically unblocked (the prerequisite
+gate exists and is tested) but remains a distinct, unimplemented change to the frozen fusion
+policy, out of scope for this ADR.
+
+**Scope of this ADR.** `include/fsoc/target_tracker.hpp` / `src/target_tracker.cpp` (new,
+additive module), `SimulationRunner`/`stage4_closed_loop_bench` wiring (both additive, default
+off, bit-identical-when-disabled, regression-tested), `apps/stage4_tracker_ablation.cpp` (new
+evaluation tool). `resolve_perception()`, the classical detector, PID gains, and `v1_baseline`
+are untouched.

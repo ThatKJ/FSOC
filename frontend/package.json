@@ -2,7 +2,7 @@
   "name": "fsoc-mission-control",
   "version": "1.0.0",
   "private": true,
-  "description": "IRODOV FSOC Alignment Control — mission-control frontend for the SIH26169 virtual camera tracking engine. Observer/presentation layer over the frozen v1_baseline C++ engine.",
+  "description": "FSOC Alignment Control — mission-control frontend for the SIH26169 virtual camera tracking engine. Observer/presentation layer over the frozen v1_baseline C++ engine.",
   "scripts": {
     "dev": "next dev -p 4317",
     "build": "next build",

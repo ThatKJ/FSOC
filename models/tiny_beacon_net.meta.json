@@ -1,0 +1,74 @@
+{
+  "model": "TinyBeaconNet",
+  "onnx_file": "tiny_beacon_net.onnx",
+  "param_count": 27282,
+  "width": 16,
+  "input": {
+    "name": "input",
+    "shape": [
+      1,
+      1,
+      240,
+      320
+    ],
+    "layout": "NCHW",
+    "dtype": "float32",
+    "range": [
+      0.0,
+      1.0
+    ]
+  },
+  "outputs": {
+    "presence_logit": {
+      "shape": [
+        1,
+        1
+      ],
+      "activation_outside_graph": "sigmoid"
+    },
+    "heatmap_logit": {
+      "shape": [
+        1,
+        1,
+        60,
+        80
+      ],
+      "activation_outside_graph": "sigmoid"
+    }
+  },
+  "apply_sigmoid_in_graph": false,
+  "opset": 12,
+  "geometry": {
+    "orig_w": 640,
+    "orig_h": 480,
+    "in_w": 320,
+    "in_h": 240,
+    "hm_w": 80,
+    "hm_h": 60,
+    "input_stride": 8,
+    "heatmap_sigma_cells": 1.75,
+    "coord_map": "x_orig = (x_hm + 0.5) * stride - 0.5"
+  },
+  "preprocessing": "cv2.resize INTER_AREA to 320x240, float32, /255.0, NCHW",
+  "provenance": {
+    "trained_epoch": 9,
+    "val_metrics": {
+      "presence_loss": 0.42960378919777115,
+      "heatmap_loss": 0.00480396716585873,
+      "precision": 0.8252234359483615,
+      "recall": 0.9233333333333333,
+      "f1": 0.8715259570005244,
+      "fp_rate": 0.5866666666666667,
+      "centroid_mae_px": 45.10426712036133,
+      "centroid_rmse_px": 158.4531707763672,
+      "tp": 831,
+      "fp": 176,
+      "tn": 124,
+      "fn": 69
+    },
+    "dataset_seed": 26169,
+    "git_commit": "6bf006fb7c0e3b86ca1aa72a4f1dd69ef48c7fce",
+    "exported_at": "2026-09-03T19:17:39Z",
+    "training_note": "synthetic virtual-camera imagery only (domain-randomized)"
+  }
+}

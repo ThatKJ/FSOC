@@ -65,6 +65,41 @@ export interface DemoSnapshot {
   detectionErrorPx?: number | null;
   /** TRUTH visibility flag (target inside the FOV) — diagnostic */
   targetVisible?: boolean;
+
+  /**
+   * DIAGNOSTIC ONLY — Stage-3 AI + Safe Hybrid perception (ADR-018). Optional:
+   * absent when reading an older fixture recorded before these CSV columns
+   * existed. `mode` is "CLASSICAL" for every run that doesn't pass --mode to
+   * fsoc_demo. Never used to recompute tracking/control — display only.
+   */
+  perception?: {
+    mode: "CLASSICAL" | "AI" | "HYBRID";
+    source: "NONE" | "CLASSICAL" | "AI" | "HYBRID_AGREEMENT";
+    aiCandidateDetected: boolean;
+    aiPresenceProbability: number | null;
+    aiInferenceMs: number | null;
+    classicalAiDistancePx: number | null;
+    rejectionReason: "NOT_APPLICABLE" | "AI_ONLY_UNVERIFIED" | "DETECTOR_DISAGREEMENT";
+  };
+
+  /**
+   * DIAGNOSTIC ONLY — P0-v2 state estimator (alpha-beta filter + temporal
+   * gate, ADR-019). Optional: absent when reading a fixture recorded before
+   * these CSV columns existed, OR when the run had tracker_enabled=false (the
+   * default) — in that case lockState is the constant "SEARCHING" for every
+   * frame, matching a pre-tracker run's signature. Never used to recompute
+   * tracking/control — display only.
+   */
+  tracker?: {
+    lockState: "SEARCHING" | "ACQUIRING" | "TRACKING" | "COASTING" | "LOST";
+    xPx: number | null;
+    yPx: number | null;
+    vxPxS: number | null;
+    vyPxS: number | null;
+    confidence: number | null;
+    isPrediction: boolean;
+    coastFrames: number;
+  };
 }
 
 export interface SimulationMeta {

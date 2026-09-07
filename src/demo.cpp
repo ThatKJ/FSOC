@@ -76,6 +76,22 @@ struct ScenarioSpec {
     return config;
 }
 
+// Same scenario config, with the perception seam overridden (Stage 3). Used
+// only by the additive PerceptionMode-aware DemoSession constructor below;
+// the existing constructors never call this, so their behaviour (and every
+// test built on them) is untouched.
+[[nodiscard]] SimulationRunnerConfig make_config_with_perception(
+    const ScenarioSpec& spec, const PerceptionMode mode,
+    std::optional<AiBeaconDetectorConfig> ai_detector, const bool tracker_enabled,
+    DemoDisturbanceConfig disturbance = {}) {
+    SimulationRunnerConfig config = make_config(spec);
+    config.perception_mode = mode;
+    config.ai_detector = std::move(ai_detector);
+    config.tracker_enabled = tracker_enabled;
+    config.disturbance = std::move(disturbance);
+    return config;
+}
+
 [[nodiscard]] std::size_t frame_count(const double duration_s, const double timestep_s) {
     return static_cast<std::size_t>(std::ceil(duration_s / timestep_s));
 }
@@ -160,6 +176,121 @@ const std::vector<DemoScenario>& all_demo_scenarios() {
         DemoScenario::LossReacquisition, DemoScenario::OpenLoop, DemoScenario::ClosedLoop};
     return kAll;
 }
+
+// ===========================================================================
+// DemoDisturbanceScenario  (Phase J)
+// ===========================================================================
+
+std::string_view to_string(const DemoDisturbanceScenario scenario) noexcept {
+    switch (scenario) {
+        case DemoDisturbanceScenario::Normal:        return "NORMAL";
+        case DemoDisturbanceScenario::Noise:         return "NOISE";
+        case DemoDisturbanceScenario::Occlusion:     return "OCCLUSION";
+        case DemoDisturbanceScenario::Clutter:       return "CLUTTER";
+        case DemoDisturbanceScenario::Reacquisition: return "REACQUISITION";
+    }
+    return "?";
+}
+
+std::string_view demo_disturbance_scenario_token(const DemoDisturbanceScenario scenario) noexcept {
+    switch (scenario) {
+        case DemoDisturbanceScenario::Normal:        return "normal";
+        case DemoDisturbanceScenario::Noise:         return "noise";
+        case DemoDisturbanceScenario::Occlusion:     return "occlusion";
+        case DemoDisturbanceScenario::Clutter:       return "clutter";
+        case DemoDisturbanceScenario::Reacquisition: return "reacquisition";
+    }
+    return "?";
+}
+
+std::string_view demo_disturbance_scenario_description(const DemoDisturbanceScenario scenario) noexcept {
+    switch (scenario) {
+        case DemoDisturbanceScenario::Normal:
+            return "calm baseline: Classical, tracker off, no disturbance";
+        case DemoDisturbanceScenario::Noise:
+            return "additive read noise; Classical alone copes unaided (Stage-4 LowSnr)";
+        case DemoDisturbanceScenario::Occlusion:
+            return "brief 2-frame occlusion, bridged by Hybrid+Tracker (Phase G DROPOUT_2_FRAME)";
+        case DemoDisturbanceScenario::Clutter:
+            return "random bright distractor every frame; Hybrid+Tracker false-lock mitigation (Phase E/F)";
+        case DemoDisturbanceScenario::Reacquisition:
+            return "long occlusion forces Lost, then a fresh reacquire (Phase G DROPOUT_LONGER)";
+    }
+    return "?";
+}
+
+std::optional<DemoDisturbanceScenario> parse_demo_disturbance_scenario(const std::string_view text) {
+    for (const DemoDisturbanceScenario scenario : all_demo_disturbance_scenarios()) {
+        if (text == demo_disturbance_scenario_token(scenario) || text == to_string(scenario)) {
+            return scenario;
+        }
+    }
+    return std::nullopt;
+}
+
+const std::vector<DemoDisturbanceScenario>& all_demo_disturbance_scenarios() {
+    static const std::vector<DemoDisturbanceScenario> kAll{
+        DemoDisturbanceScenario::Normal, DemoDisturbanceScenario::Noise, DemoDisturbanceScenario::Occlusion,
+        DemoDisturbanceScenario::Clutter, DemoDisturbanceScenario::Reacquisition};
+    return kAll;
+}
+
+namespace {
+
+// One place a DemoDisturbanceScenario becomes runnable pieces -- the
+// disturbance-preset analogue of spec_for()/make_config_with_perception().
+struct DisturbancePlan {
+    DemoScenario base_scenario{DemoScenario::StaticAcquisition};
+    double duration_s{6.0};
+    PerceptionMode mode{PerceptionMode::Classical};
+    bool tracker_enabled{false};
+    DemoDisturbanceConfig disturbance{};
+};
+
+[[nodiscard]] DisturbancePlan plan_for(const DemoDisturbanceScenario preset) {
+    DisturbancePlan plan{};
+    plan.base_scenario = DemoScenario::StaticAcquisition;  // every preset: same centered target
+    plan.duration_s = 6.0;                                 // 300 frames @ 50 Hz -- room for the window
+
+    switch (preset) {
+        case DemoDisturbanceScenario::Normal:
+            return plan;  // Classical, tracker off, disturbance None -- all defaults
+
+        case DemoDisturbanceScenario::Noise:
+            plan.disturbance.kind = DemoDisturbanceKind::Noise;
+            plan.disturbance.noise_sigma = 30.0;
+            return plan;
+
+        case DemoDisturbanceScenario::Occlusion:
+            plan.mode = PerceptionMode::Hybrid;
+            plan.tracker_enabled = true;
+            plan.disturbance.kind = DemoDisturbanceKind::Occlusion;
+            plan.disturbance.occlusion_start_frame = 150;   // 3.0 s in -- well past acquisition
+            plan.disturbance.occlusion_duration_frames = 2;  // bridged (max_coast_frames default = 2)
+            return plan;
+
+        case DemoDisturbanceScenario::Clutter:
+            plan.mode = PerceptionMode::Hybrid;
+            plan.tracker_enabled = true;
+            plan.disturbance.kind = DemoDisturbanceKind::Clutter;
+            // Straddles the beacon's own integrated signal (default range,
+            // see demo_disturbance.hpp) so which blob wins genuinely varies
+            // frame to frame -- a fixed, always-brighter distractor would
+            // make initial acquisition itself impossible (verified empirically).
+            return plan;
+
+        case DemoDisturbanceScenario::Reacquisition:
+            plan.mode = PerceptionMode::Hybrid;
+            plan.tracker_enabled = true;
+            plan.disturbance.kind = DemoDisturbanceKind::Occlusion;
+            plan.disturbance.occlusion_start_frame = 150;
+            plan.disturbance.occlusion_duration_frames = 15;  // exceeds max_coast_frames -> full Lost
+            return plan;
+    }
+    return plan;
+}
+
+}  // namespace
 
 // ===========================================================================
 // DemoScenarioPlan
@@ -288,6 +419,43 @@ DemoSession::DemoSession(const DemoScenario scenario, const double duration_s)
       max_tilt_rate_rad_s_(config_.camera.max_tilt_rate_rad_s),
       runner_(config_, *trajectory_) {}
 
+// Additive (Stage 3): identical to the two-arg constructor except the
+// perception seam is overridden. Passing PerceptionMode::Classical here is
+// bit-identical to the constructor above (both end up with the same
+// baseline_runner_config()-derived config); the two-arg constructor is
+// otherwise untouched and remains the one every pre-Stage-3 caller/test uses.
+DemoSession::DemoSession(
+    const DemoScenario scenario, const double duration_s, const PerceptionMode mode,
+    std::optional<AiBeaconDetectorConfig> ai_detector, const bool tracker_enabled)
+    : scenario_(scenario),
+      trajectory_(make_trajectory(spec_for(scenario))),
+      config_(make_config_with_perception(spec_for(scenario), mode, std::move(ai_detector), tracker_enabled)),
+      duration_s_((require_positive_finite_duration(duration_s), duration_s)),
+      total_frames_(frame_count(duration_s_, config_.timestep_s)),
+      max_pan_rate_rad_s_(config_.camera.max_pan_rate_rad_s),
+      max_tilt_rate_rad_s_(config_.camera.max_tilt_rate_rad_s),
+      runner_(config_, *trajectory_) {}
+
+// Phase J: a named disturbance preset -- plan_for() is the single place a
+// DemoDisturbanceScenario becomes a (base scenario, perception mode,
+// tracker_enabled, disturbance config) bundle. Mirrors the perception-aware
+// constructor above exactly (including its precedent of calling spec_for()
+// once per member rather than caching it -- a cheap, pure switch), with the
+// disturbance config additionally threaded into make_config_with_perception().
+DemoSession::DemoSession(
+    const DemoDisturbanceScenario preset, std::optional<AiBeaconDetectorConfig> ai_detector)
+    : scenario_(plan_for(preset).base_scenario),
+      trajectory_(make_trajectory(spec_for(plan_for(preset).base_scenario))),
+      config_(make_config_with_perception(
+          spec_for(plan_for(preset).base_scenario), plan_for(preset).mode, std::move(ai_detector),
+          plan_for(preset).tracker_enabled, plan_for(preset).disturbance)),
+      duration_s_(
+          (require_positive_finite_duration(plan_for(preset).duration_s), plan_for(preset).duration_s)),
+      total_frames_(frame_count(duration_s_, config_.timestep_s)),
+      max_pan_rate_rad_s_(config_.camera.max_pan_rate_rad_s),
+      max_tilt_rate_rad_s_(config_.camera.max_tilt_rate_rad_s),
+      runner_(config_, *trajectory_) {}
+
 DemoSnapshot DemoSession::step() {
     if (run_state_ == DemoRunState::Ready) {
         run_state_ = DemoRunState::Running;
@@ -365,7 +533,9 @@ std::string demo_help_text() {
     std::string help;
     help += "fsoc_demo - SIH26169 FSOC baseline demo runner (v1_baseline, FROZEN)\n\n";
     help += "Usage:\n";
-    help += "  fsoc_demo <scenario> [--duration <seconds>] [--csv <path>] [--quiet]\n";
+    help += "  fsoc_demo <scenario> [--mode classical|ai|hybrid] [--tracker] [--duration <seconds>]\n";
+    help += "            [--csv <path>] [--quiet]\n";
+    help += "  fsoc_demo <disturbance-preset> [--csv <path>] [--quiet]\n";
     help += "  fsoc_demo --help\n\n";
     help += "Scenarios:\n";
     for (const DemoScenario scenario : all_demo_scenarios()) {
@@ -378,14 +548,40 @@ std::string demo_help_text() {
         help += demo_scenario_description(scenario);
         help += '\n';
     }
+    help += "\nDisturbance presets (Phase J -- named, deterministic, NOT combinable with\n";
+    help += "--mode/--tracker/--duration; each already fixes its own perception mode,\n";
+    help += "tracker, and disturbance):\n";
+    for (const DemoDisturbanceScenario preset : all_demo_disturbance_scenarios()) {
+        const std::string_view token = demo_disturbance_scenario_token(preset);
+        help += "  ";
+        help += token;
+        for (std::size_t pad = token.size(); pad < 15; ++pad) {
+            help += ' ';
+        }
+        help += demo_disturbance_scenario_description(preset);
+        help += '\n';
+    }
     help += "\nOptions:\n";
+    help += "  --mode <mode>         classical (default, v1_baseline) | ai | hybrid\n";
+    help += "                        ai/hybrid run the Stage-3 C++ ONNX TinyBeaconNet\n";
+    help += "                        detector (models/tiny_beacon_net.onnx); falls back to\n";
+    help += "                        classical with a warning if the model can't be loaded\n";
+    help += "  --tracker             enable the alpha-beta state estimator + temporal-\n";
+    help += "                        consistency gate (default off); bridges brief detection\n";
+    help += "                        gaps and rejects implausible jumps -- see\n";
+    help += "                        include/fsoc/target_tracker.hpp and docs/MVP_ABLATION.md\n";
     help += "  --duration <seconds>  override the scenario's validated duration (demo knob only)\n";
-    help += "  --csv <path>          write the 27-column telemetry CSV for this run\n";
+    help += "  --csv <path>          write the telemetry CSV for this run\n";
+    help += "                        (27 Step-8 fields + 7 Stage-3 perception fields\n";
+    help += "                        + 8 P0-v2 tracker fields, docs/08_TELEMETRY_SCHEMA.md)\n";
     help += "  --quiet               print only the end-of-run summary\n\n";
     help += "Notes:\n";
-    help += "  Fixed 50 Hz simulation (dt = 0.02 s). The baseline PID (kp=12, ki=0, kd=0)\n";
-    help += "  and every algorithm are frozen at v1_baseline; this tool only packages the\n";
-    help += "  validated engine. Core values are radians; the CLI prints degrees.";
+    help += "  Fixed 50 Hz simulation (dt = 0.02 s). The baseline PID (kp=12, ki=0, kd=0),\n";
+    help += "  the classical detector, and v1_baseline itself are frozen and UNCHANGED by\n";
+    help += "  --mode or --tracker; they only change which perception/estimation path feeds\n";
+    help += "  the SAME control loop (ADR-018 Safe Hybrid: AI never gets independent control\n";
+    help += "  authority; ADR-019: the tracker is a post-perception gate, not a fusion change).\n";
+    help += "  Core values are radians; the CLI prints degrees.";
     return help;
 }
 

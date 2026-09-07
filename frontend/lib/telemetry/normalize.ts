@@ -40,6 +40,21 @@ export const CSV_COLUMNS = [
   "tilt_saturated",
   "detection_error_px",
   "tracking_state",
+  "perception_mode",
+  "perception_source",
+  "ai_candidate_detected",
+  "ai_presence_probability",
+  "ai_inference_ms",
+  "classical_ai_distance_px",
+  "perception_rejection_reason",
+  "tracker_lock_state",
+  "tracker_x_px",
+  "tracker_y_px",
+  "tracker_vx_px_s",
+  "tracker_vy_px_s",
+  "tracker_confidence",
+  "tracker_is_prediction",
+  "tracker_coast_frames",
 ] as const;
 
 /** minimal CSV split — the FSOC telemetry CSV has no quoted / comma-bearing fields */
@@ -89,6 +104,40 @@ export function rowToSnapshot(row: string[], header?: string[]): DemoSnapshot {
   const trackingState: TrackingState =
     stateRaw === "TargetLost" || stateRaw === "TARGET_LOST" ? "TARGET_LOST" : "TRACKING";
 
+  // Stage-3 perception columns are additive: absent entirely on older
+  // fixtures recorded before they existed (idx returns -1 for all of them).
+  type PerceptionInfo = NonNullable<DemoSnapshot["perception"]>;
+  const hasPerceptionColumns = idx("perception_mode") >= 0;
+  const perception: PerceptionInfo | undefined = hasPerceptionColumns
+    ? {
+        mode: (get("perception_mode")?.trim() || "CLASSICAL") as PerceptionInfo["mode"],
+        source: (get("perception_source")?.trim() || "NONE") as PerceptionInfo["source"],
+        aiCandidateDetected: bool01(get("ai_candidate_detected")),
+        aiPresenceProbability: optNum(get("ai_presence_probability")),
+        aiInferenceMs: optNum(get("ai_inference_ms")),
+        classicalAiDistancePx: optNum(get("classical_ai_distance_px")),
+        rejectionReason: (get("perception_rejection_reason")?.trim() ||
+          "NOT_APPLICABLE") as PerceptionInfo["rejectionReason"],
+      }
+    : undefined;
+
+  // P0-v2 tracker columns are additive: absent entirely on older fixtures
+  // recorded before they existed (idx returns -1 for all of them).
+  type TrackerInfo = NonNullable<DemoSnapshot["tracker"]>;
+  const hasTrackerColumns = idx("tracker_lock_state") >= 0;
+  const tracker: TrackerInfo | undefined = hasTrackerColumns
+    ? {
+        lockState: (get("tracker_lock_state")?.trim() || "SEARCHING") as TrackerInfo["lockState"],
+        xPx: optNum(get("tracker_x_px")),
+        yPx: optNum(get("tracker_y_px")),
+        vxPxS: optNum(get("tracker_vx_px_s")),
+        vyPxS: optNum(get("tracker_vy_px_s")),
+        confidence: optNum(get("tracker_confidence")),
+        isPrediction: bool01(get("tracker_is_prediction")),
+        coastFrames: Math.round(num(get("tracker_coast_frames")) || 0),
+      }
+    : undefined;
+
   return {
     simulationTime: num(get("simulation_time_s")),
     frame: Math.round(num(get("frame_index"))),
@@ -132,6 +181,8 @@ export function rowToSnapshot(row: string[], header?: string[]): DemoSnapshot {
       tiltSaturated: bool01(get("tilt_saturated")),
     },
     detectionErrorPx: optNum(get("detection_error_px")),
+    perception,
+    tracker,
     targetVisible: bool01(get("target_visible")),
   };
 }

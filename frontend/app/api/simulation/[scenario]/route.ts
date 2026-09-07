@@ -42,6 +42,16 @@ export async function GET(
     return NextResponse.json({ error: "duration must be a positive number of seconds" }, { status: 400 });
   }
 
+  // Stage-3 perception mode + P0-v2 tracker (ADR-018/ADR-019) — LOCAL ENGINE
+  // MODE only; replay fixtures are always CLASSICAL, tracker off (documented,
+  // not a bug: the checked-in fixtures were generated with neither flag).
+  const modeParam = (url.searchParams.get("mode") ?? "classical").toLowerCase();
+  if (modeParam !== "classical" && modeParam !== "ai" && modeParam !== "hybrid") {
+    return NextResponse.json({ error: "mode must be one of: classical, ai, hybrid" }, { status: 400 });
+  }
+  const mode = modeParam as "classical" | "ai" | "hybrid";
+  const trackerEnabled = url.searchParams.get("tracker") === "1";
+
   const cfg = SCENARIOS[scenario];
   const baseMeta = {
     scenario,
@@ -60,7 +70,7 @@ export async function GET(
   // ---- LOCAL ENGINE MODE ----
   if (wantEngine && engineAvailable()) {
     try {
-      const run = await runEngineScenario(scenario, { durationS });
+      const run = await runEngineScenario(scenario, { durationS, mode, trackerEnabled });
       const meta: SimulationMeta = {
         ...baseMeta,
         frames: run.frames.length,

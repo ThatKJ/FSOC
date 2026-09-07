@@ -8,7 +8,7 @@ import { cn } from "@/lib/cn";
 
 /** Mission Control right rail — "Telemetry Stream". All values from the current C++ frame. */
 export function TelemetryStream({ className }: { className?: string }) {
-  const { current, meta, runState, pause, reset, simTime, playing } = useSimulation();
+  const { current, meta, runState, pause, reset, simTime, playing, trackerEnabled } = useSimulation();
   const lost = current.trackingState === "TARGET_LOST";
   const t = current.tracking;
   const c = current.camera;
@@ -67,6 +67,61 @@ export function TelemetryStream({ className }: { className?: string }) {
             }
           />
         </div>
+
+        {current.perception && (
+          <div className="flex flex-col gap-margin-sm bg-surface-container-low p-margin-md">
+            <span className="mb-unit font-label-xs text-label-xs text-on-surface-variant">
+              PERCEPTION (STAGE 3)
+            </span>
+            <KeyValueRow k="MODE" v={current.perception.mode} />
+            <KeyValueRow
+              k="SOURCE"
+              v={current.perception.source}
+              tone={current.perception.source === "NONE" ? "lost" : "primary"}
+            />
+            <KeyValueRow
+              k="AI CONF"
+              border={current.perception.rejectionReason === "NOT_APPLICABLE"}
+              v={
+                current.perception.aiPresenceProbability != null
+                  ? fixed(current.perception.aiPresenceProbability, 3)
+                  : "—"
+              }
+            />
+            {current.perception.rejectionReason !== "NOT_APPLICABLE" && (
+              <KeyValueRow k="REJECTED" v={current.perception.rejectionReason} tone="warning" border={false} />
+            )}
+          </div>
+        )}
+
+        {trackerEnabled && current.tracker && (
+          <div className="flex flex-col gap-margin-sm bg-surface-container-low p-margin-md">
+            <span className="mb-unit font-label-xs text-label-xs text-on-surface-variant">
+              STATE ESTIMATOR (P0-v2)
+            </span>
+            <KeyValueRow
+              k="LOCK STATE"
+              v={current.tracker.lockState}
+              tone={
+                current.tracker.lockState === "TRACKING"
+                  ? "primary"
+                  : current.tracker.lockState === "COASTING"
+                    ? "warning"
+                    : "lost"
+              }
+            />
+            <KeyValueRow
+              k="CONFIDENCE"
+              v={current.tracker.confidence != null ? fixed(current.tracker.confidence, 2) : "—"}
+            />
+            <KeyValueRow
+              k="POSITION"
+              v={current.tracker.isPrediction ? "PREDICTED" : "MEASURED"}
+              tone={current.tracker.isPrediction ? "warning" : "primary"}
+              border={false}
+            />
+          </div>
+        )}
 
         <div className="flex flex-col gap-margin-sm bg-surface-container-low p-margin-md">
           <span className="mb-unit font-label-xs text-label-xs text-on-surface-variant">TARGET (TRUTH)</span>

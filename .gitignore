@@ -9,3 +9,22 @@ compile_commands.json
 *.profraw
 *.gcda
 *.gcno
+
+# --- V2 AI PERCEPTION ---
+# Datasets/eval artifacts are regenerated from a fixed seed, never committed
+# (generated/ is already ignored; listed explicitly for clarity).
+generated/ai_dataset/
+generated/ai_validation/
+# Offline Python training tooling — not part of the C++ runtime.
+tools/ai/.venv/
+.venv/
+.venv-ai/
+__pycache__/
+*.pyc
+# Training artifacts: the exported ONNX model IS committed (models/*.onnx);
+# bulky checkpoints / TensorBoard logs are not.
+models/*.pt
+models/*.pth
+models/*.ckpt
+models/checkpoints/
+models/runs/

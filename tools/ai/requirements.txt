@@ -1,0 +1,18 @@
+# TinyBeaconNet offline training / export toolchain.
+# Python 3.10-3.12 (Homebrew python@3.12 recommended on macOS). This toolchain is
+# OFFLINE ONLY — it never runs in the C++ closed-loop / demo path.
+#
+#   python3.12 -m venv tools/ai/.venv
+#   source tools/ai/.venv/bin/activate
+#   pip install -r tools/ai/requirements.txt
+#
+# Versions are the ones this pipeline was authored against; newer patch releases
+# are generally fine. torch>=2.2 is required for stable Apple-MPS + opset-12 ONNX
+# export. opencv-python is pinned so the training-time resize matches the C++
+# OpenCV 5 INTER_AREA resize used at inference.
+
+torch>=2.2,<2.6
+numpy>=1.26,<2.3
+opencv-python>=4.9,<4.12
+onnx>=1.15,<1.18
+onnxruntime>=1.17,<1.21

@@ -74,6 +74,29 @@ TelemetryRecord make_telemetry_record(
     record.tracking_state =
         result.tracking_error.has_value() ? TrackingState::Tracking : TrackingState::TargetLost;
 
+    record.perception_mode = std::string(to_string(result.perception.perception_mode));
+    record.perception_source = std::string(to_string(result.perception.perception_source));
+    record.ai_candidate_detected = result.perception.ai_candidate_detected;
+    record.ai_presence_probability = result.perception.ai_presence_probability;
+    record.ai_inference_ms = result.perception.ai_inference_ms;
+    record.classical_ai_distance_px = result.perception.classical_ai_distance_px;
+    record.perception_rejection_reason = std::string(to_string(result.perception.rejection_reason));
+
+    const TrackedState& tracked = result.tracked_state;
+    record.tracker_lock_state = std::string(to_string(tracked.lock_state));
+    record.tracker_is_prediction = tracked.is_prediction;
+    record.tracker_coast_frames = tracked.coast_frames;
+    const bool tracker_has_estimate = tracked.lock_state == LockState::Acquiring ||
+                                       tracked.lock_state == LockState::Tracking ||
+                                       tracked.lock_state == LockState::Coasting;
+    if (tracker_has_estimate) {
+        record.tracker_x_px = tracked.x_px;
+        record.tracker_y_px = tracked.y_px;
+        record.tracker_vx_px_s = tracked.vx_px_s;
+        record.tracker_vy_px_s = tracked.vy_px_s;
+        record.tracker_confidence = tracked.confidence;
+    }
+
     return record;
 }
 
@@ -110,6 +133,21 @@ const std::vector<std::string>& CsvTelemetryLogger::column_names() {
         "tilt_saturated",
         "detection_error_px",
         "tracking_state",
+        "perception_mode",
+        "perception_source",
+        "ai_candidate_detected",
+        "ai_presence_probability",
+        "ai_inference_ms",
+        "classical_ai_distance_px",
+        "perception_rejection_reason",
+        "tracker_lock_state",
+        "tracker_x_px",
+        "tracker_y_px",
+        "tracker_vx_px_s",
+        "tracker_vy_px_s",
+        "tracker_confidence",
+        "tracker_is_prediction",
+        "tracker_coast_frames",
     };
     return columns;
 }
@@ -178,7 +216,24 @@ void CsvTelemetryLogger::record(const TelemetryRecord& rec) {
          << rec.applied_pan_rate_rad_s << ',' << rec.applied_tilt_rate_rad_s << ','
          << (rec.pan_saturated ? 1 : 0) << ',' << (rec.tilt_saturated ? 1 : 0) << ',';
     put_optional(out_, rec.detection_error_px);
-    out_ << ',' << to_string(rec.tracking_state) << '\n';
+    out_ << ',' << to_string(rec.tracking_state) << ',' << rec.perception_mode << ','
+         << rec.perception_source << ',' << (rec.ai_candidate_detected ? 1 : 0) << ',';
+    put_optional(out_, rec.ai_presence_probability);
+    out_ << ',';
+    put_optional(out_, rec.ai_inference_ms);
+    out_ << ',';
+    put_optional(out_, rec.classical_ai_distance_px);
+    out_ << ',' << rec.perception_rejection_reason << ',' << rec.tracker_lock_state << ',';
+    put_optional(out_, rec.tracker_x_px);
+    out_ << ',';
+    put_optional(out_, rec.tracker_y_px);
+    out_ << ',';
+    put_optional(out_, rec.tracker_vx_px_s);
+    out_ << ',';
+    put_optional(out_, rec.tracker_vy_px_s);
+    out_ << ',';
+    put_optional(out_, rec.tracker_confidence);
+    out_ << ',' << (rec.tracker_is_prediction ? 1 : 0) << ',' << rec.tracker_coast_frames << '\n';
     out_.flush();  // synchronous: the file is always current on disk
 
     ++records_written_;

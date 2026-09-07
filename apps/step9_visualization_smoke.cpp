@@ -1,8 +1,9 @@
 // Step 9 smoke test: engineering camera-view visualization.
 //
-// Headless (no cv::imshow / cv::waitKey). Runs Step-7 scenarios, reconstructs the
-// exact perception frame from each SimulationStepResult, annotates a COPY, and
-// writes selected PNGs (+ optional MP4) into generated/step9/.
+// Headless (no cv::imshow / cv::waitKey). Runs Step-7 scenarios, reads the
+// exact perception frame SimulationStepResult::rendered_frame already carries
+// (the frame the detector actually consumed — not a re-render), annotates a
+// COPY, and writes selected PNGs (+ optional MP4) into generated/step9/.
 
 #include <chrono>
 #include <cmath>
@@ -18,7 +19,6 @@
 
 #include "fsoc/config.hpp"
 #include "fsoc/geometry.hpp"
-#include "fsoc/renderer.hpp"
 #include "fsoc/simulation_runner.hpp"
 #include "fsoc/telemetry.hpp"
 #include "fsoc/trajectory.hpp"
@@ -34,10 +34,9 @@ using fsoc::rad_to_deg;
     return os.str();
 }
 
-// Reconstruct + annotate a set of frames, write them as PNGs, return the
-// annotated BGR frames (return value may be ignored).
+// Annotate a set of frames, write them as PNGs, return the annotated BGR
+// frames (return value may be ignored).
 std::vector<cv::Mat> annotate_and_write(
-    const fsoc::SyntheticCameraRenderer& renderer,
     const fsoc::TrackingVisualizer& visualizer,
     const fsoc::RecordedRun& run,
     const std::vector<std::size_t>& frame_indices,
@@ -52,8 +51,9 @@ std::vector<cv::Mat> annotate_and_write(
         const fsoc::SimulationStepResult& result = run.step_results[i];
         const fsoc::TelemetryRecord& telemetry = run.telemetry[i];
 
-        // The exact frame the detector ran on (renderer is deterministic).
-        const cv::Mat base_frame = renderer.render(result.observation);
+        // The exact frame the detector ran on — stored on the result itself,
+        // not re-rendered from `result.observation`.
+        const cv::Mat& base_frame = result.rendered_frame;
 
         const auto t0 = std::chrono::steady_clock::now();
         const cv::Mat display = visualizer.annotate(base_frame, result, telemetry);
@@ -96,7 +96,6 @@ int main() {
 
     std::filesystem::create_directories("generated/step9");
     const SimulationRunnerConfig base = baseline_runner_config();
-    const SyntheticCameraRenderer renderer{base.renderer};
     const TrackingVisualizer visualizer{VisualizationConfig{}};  // defaults: truth marker OFF
 
     std::cout << "Step 9: engineering camera-view visualization (headless)\n"
@@ -119,13 +118,12 @@ int main() {
         const std::vector<std::size_t> keyframes = {0, 5, 12, 25, 50,
                                                     run.step_results.size() - 1};
         const std::size_t before = png_total;
-        annotate_and_write(renderer, visualizer, run, keyframes, "generated/step9/static_",
+        annotate_and_write(visualizer, run, keyframes, "generated/step9/static_",
                            annotate_us, png_total);
         // A dense sequence (every frame) for the optional video.
         for (std::size_t i = 0; i < run.step_results.size(); ++i) {
-            const cv::Mat frame = renderer.render(run.step_results[i].observation);
-            video_static.push_back(
-                visualizer.annotate(frame, run.step_results[i], run.telemetry[i]));
+            video_static.push_back(visualizer.annotate(
+                run.step_results[i].rendered_frame, run.step_results[i], run.telemetry[i]));
         }
 
         for (const std::size_t i : keyframes) {
@@ -164,13 +162,12 @@ int main() {
             keyframes.push_back(i);
         }
         std::size_t before = png_total;
-        annotate_and_write(renderer, visualizer, run, keyframes, "generated/step9/sinusoidal_",
+        annotate_and_write(visualizer, run, keyframes, "generated/step9/sinusoidal_",
                            annotate_us, png_total);
         // dense frames for the optional video
         for (std::size_t i = 0; i < run.step_results.size(); ++i) {
-            const cv::Mat frame = renderer.render(run.step_results[i].observation);
-            video_sinusoidal.push_back(
-                visualizer.annotate(frame, run.step_results[i], run.telemetry[i]));
+            video_sinusoidal.push_back(visualizer.annotate(
+                run.step_results[i].rendered_frame, run.step_results[i], run.telemetry[i]));
         }
 
         const auto m = evaluate(run.step_results);
@@ -215,7 +212,7 @@ int main() {
         const bool have_reacq = reacq_i < run.step_results.size();
         if (have_lost) {
             const cv::Mat f =
-                visualizer.annotate(renderer.render(run.step_results[lost_i].observation),
+                visualizer.annotate(run.step_results[lost_i].rendered_frame,
                                     run.step_results[lost_i], run.telemetry[lost_i]);
             if (write_png("generated/step9/lost_lost.png", f)) {
                 ++png_total;
@@ -224,7 +221,7 @@ int main() {
         }
         if (have_reacq) {
             const cv::Mat f =
-                visualizer.annotate(renderer.render(run.step_results[reacq_i].observation),
+                visualizer.annotate(run.step_results[reacq_i].rendered_frame,
                                     run.step_results[reacq_i], run.telemetry[reacq_i]);
             if (write_png("generated/step9/lost_reacquired.png", f)) {
                 ++png_total;

@@ -37,6 +37,8 @@ import { EMPTY_SNAPSHOT } from "./emptySnapshot";
 export type PlaybackSpeed = 0.5 | 1 | 2;
 export type TelemetrySource = "auto" | "engine" | "replay";
 export type LoadStatus = "idle" | "loading" | "ready" | "error";
+/** Stage-3 perception seam (ADR-018), engine-mode only — replay fixtures are always CLASSICAL. */
+export type PerceptionModeSelection = "classical" | "ai" | "hybrid";
 
 interface SimState {
   scenario: ScenarioId;
@@ -45,11 +47,15 @@ interface SimState {
   playing: boolean;
   frameIndex: number;
   runState: RunState;
+  perceptionMode: PerceptionModeSelection;
+  trackerEnabled: boolean;
 }
 
 type Action =
   | { type: "SET_SCENARIO"; scenario: ScenarioId }
   | { type: "SET_SOURCE"; source: TelemetrySource }
+  | { type: "SET_PERCEPTION_MODE"; mode: PerceptionModeSelection }
+  | { type: "SET_TRACKER_ENABLED"; enabled: boolean }
   | { type: "SET_SPEED"; speed: PlaybackSpeed }
   | { type: "PLAY" }
   | { type: "PAUSE" }
@@ -68,6 +74,12 @@ function reducer(s: SimState, a: Action): SimState {
     case "SET_SOURCE":
       if (a.source === s.source) return s;
       return { ...s, source: a.source, frameIndex: 0, playing: false, runState: "READY" };
+    case "SET_PERCEPTION_MODE":
+      if (a.mode === s.perceptionMode) return s;
+      return { ...s, perceptionMode: a.mode, frameIndex: 0, playing: false, runState: "READY" };
+    case "SET_TRACKER_ENABLED":
+      if (a.enabled === s.trackerEnabled) return s;
+      return { ...s, trackerEnabled: a.enabled, frameIndex: 0, playing: false, runState: "READY" };
     case "SET_SPEED":
       return { ...s, speed: a.speed };
     case "PLAY":
@@ -111,6 +123,10 @@ interface SimContextValue {
   runScenario: (s: ScenarioId) => void;
   source: TelemetrySource;
   setSource: (s: TelemetrySource) => void;
+  perceptionMode: PerceptionModeSelection;
+  setPerceptionMode: (m: PerceptionModeSelection) => void;
+  trackerEnabled: boolean;
+  setTrackerEnabled: (e: boolean) => void;
   // telemetry
   frames: DemoSnapshot[];
   meta: SimulationMeta | null;
@@ -149,6 +165,8 @@ export function SimulationProvider({ children }: { children: React.ReactNode }) 
     playing: false,
     frameIndex: 0,
     runState: "READY",
+    perceptionMode: "classical",
+    trackerEnabled: false,
   });
 
   const [frames, setFrames] = useState<DemoSnapshot[]>([]);
@@ -165,11 +183,13 @@ export function SimulationProvider({ children }: { children: React.ReactNode }) 
     let alive = true;
     // only rewind the playhead when the SELECTION changes — a plain refetch
     // (reloadKey bump) of the same scenario keeps the current position.
-    const selectionKey = `${state.scenario}:${state.source}`;
+    const selectionKey = `${state.scenario}:${state.source}:${state.perceptionMode}:${state.trackerEnabled}`;
     const isNewSelection = loadedKeyRef.current !== selectionKey;
     setStatus("loading");
     setError(null);
-    fetch(`/api/simulation/${state.scenario}?source=${state.source}`, { signal: ctrl.signal })
+    const params = new URLSearchParams({ source: state.source, mode: state.perceptionMode });
+    if (state.trackerEnabled) params.set("tracker", "1");
+    fetch(`/api/simulation/${state.scenario}?${params.toString()}`, { signal: ctrl.signal })
       .then(async (r) => {
         const body = (await r.json()) as SimulationPayload | { error: string; detail?: string };
         if (!r.ok || !("frames" in body)) {
@@ -199,7 +219,7 @@ export function SimulationProvider({ children }: { children: React.ReactNode }) 
       alive = false;
       ctrl.abort();
     };
-  }, [state.scenario, state.source, reloadKey]);
+  }, [state.scenario, state.source, state.perceptionMode, state.trackerEnabled, reloadKey]);
 
   const events = useMemo(() => deriveEvents(frames), [frames]);
   const totalFrames = frames.length;
@@ -245,7 +265,7 @@ export function SimulationProvider({ children }: { children: React.ReactNode }) 
   useEffect(() => {
     accRef.current = 0;
     lastTsRef.current = null;
-  }, [state.frameIndex, state.scenario, state.source]);
+  }, [state.frameIndex, state.scenario, state.source, state.perceptionMode, state.trackerEnabled]);
 
   const clampedIndex = totalFrames > 0 ? Math.min(state.frameIndex, totalFrames - 1) : 0;
   const current = totalFrames > 0 ? frames[clampedIndex] : EMPTY_SNAPSHOT;
@@ -260,6 +280,14 @@ export function SimulationProvider({ children }: { children: React.ReactNode }) 
     setReloadKey((k) => k + 1);
   }, []);
   const setSource = useCallback((s: TelemetrySource) => dispatch({ type: "SET_SOURCE", source: s }), []);
+  const setPerceptionMode = useCallback(
+    (m: PerceptionModeSelection) => dispatch({ type: "SET_PERCEPTION_MODE", mode: m }),
+    [],
+  );
+  const setTrackerEnabled = useCallback(
+    (e: boolean) => dispatch({ type: "SET_TRACKER_ENABLED", enabled: e }),
+    [],
+  );
   const setSpeed = useCallback((s: PlaybackSpeed) => dispatch({ type: "SET_SPEED", speed: s }), []);
   const play = useCallback(() => dispatch({ type: "PLAY" }), []);
   const pause = useCallback(() => dispatch({ type: "PAUSE" }), []);
@@ -286,6 +314,10 @@ export function SimulationProvider({ children }: { children: React.ReactNode }) 
       runScenario,
       source: state.source,
       setSource,
+      perceptionMode: state.perceptionMode,
+      setPerceptionMode,
+      trackerEnabled: state.trackerEnabled,
+      setTrackerEnabled,
       frames,
       meta,
       events,
@@ -311,9 +343,11 @@ export function SimulationProvider({ children }: { children: React.ReactNode }) 
     }),
     [
       state.scenario, state.source, state.playing, state.runState, state.speed,
+      state.perceptionMode, state.trackerEnabled,
       frames, meta, events, status, error, reload,
       clampedIndex, current, simTime, progress, totalFrames,
-      setScenario, runScenario, setSource, setSpeed, play, pause, toggle, reset, seek, seekTime, stepFrame,
+      setScenario, runScenario, setSource, setPerceptionMode, setTrackerEnabled,
+      setSpeed, play, pause, toggle, reset, seek, seekTime, stepFrame,
     ],
   );
 

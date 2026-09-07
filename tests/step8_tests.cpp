@@ -226,9 +226,12 @@ void test_csv_header_deterministic() {  // (13)
     const auto& a = CsvTelemetryLogger::column_names();
     const auto& b = CsvTelemetryLogger::column_names();
     CHECK(a == b);
-    CHECK(a.size() == 27);
+    // 27 Step-8 core fields + 7 Stage-3 perception fields + 8 P0-v2 tracker fields
+    CHECK(a.size() == 42);
     CHECK(a.front() == "simulation_time_s");
-    CHECK(a.back() == "tracking_state");
+    CHECK(a.at(26) == "tracking_state");         // last of the original 27
+    CHECK(a.at(33) == "perception_rejection_reason");  // last of the Stage-3 additions
+    CHECK(a.back() == "tracker_coast_frames");
 
     const std::filesystem::path p1 = temp_csv("fsoc_step8_hdr1.csv");
     const std::filesystem::path p2 = temp_csv("fsoc_step8_hdr2.csv");
@@ -273,12 +276,44 @@ void test_csv_column_count_and_empty_fields() {  // (14)(15)
     CHECK(lost_fields.at(14).empty());   // angular_error_pan_rad
     CHECK(lost_fields.at(16).empty());   // angular_error_total_rad
     CHECK(lost_fields.at(25).empty());   // detection_error_px
-    CHECK(lost_fields.back() == "TargetLost");  // tracking_state
+    CHECK(lost_fields.at(26) == "TargetLost");  // tracking_state (no longer the last column)
 
-    // the full record has NO empty fields.
-    for (const auto& f : split_csv_line(lines[1])) {
-        CHECK(!f.empty());
+    // The full (Classical-mode) record has no empty fields among the original
+    // 27 columns, but the 3 AI-diagnostic optionals (ai_presence_probability,
+    // ai_inference_ms, classical_ai_distance_px) are legitimately empty:
+    // Classical mode never produces an AI candidate, so there is nothing to
+    // report there — this is the correct behaviour, not a missing value.
+    const auto full_fields = split_csv_line(lines[1]);
+    for (std::size_t i = 0; i < 27; ++i) {
+        CHECK(!full_fields.at(i).empty());
     }
+    // base_result() is a hand-built SimulationStepResult that never ran
+    // resolve_perception(), so .perception is left at its struct default
+    // (mode=Classical, source=None) regardless of .detection — this test is
+    // about make_telemetry_record()'s field copy, not perception resolution.
+    CHECK(full_fields.at(27) == "CLASSICAL");   // perception_mode
+    CHECK(full_fields.at(28) == "NONE");        // perception_source (default; not resolved here)
+    CHECK(full_fields.at(29) == "0");           // ai_candidate_detected
+    CHECK(full_fields.at(30).empty());          // ai_presence_probability
+    CHECK(full_fields.at(31).empty());          // ai_inference_ms
+    CHECK(full_fields.at(32).empty());          // classical_ai_distance_px
+    CHECK(full_fields.at(33) == "NOT_APPLICABLE");  // perception_rejection_reason
+
+    // base_result() never enables the tracker (tracker_enabled defaults to
+    // false), so both records show the tracker's untouched default row:
+    // SEARCHING, no position estimate, not a prediction, zero coast frames --
+    // identical for the "full" and "lost" records since the tracker never ran
+    // in either case.
+    CHECK(full_fields.at(34) == "SEARCHING");  // tracker_lock_state
+    CHECK(full_fields.at(35).empty());         // tracker_x_px
+    CHECK(full_fields.at(36).empty());         // tracker_y_px
+    CHECK(full_fields.at(37).empty());         // tracker_vx_px_s
+    CHECK(full_fields.at(38).empty());         // tracker_vy_px_s
+    CHECK(full_fields.at(39).empty());         // tracker_confidence
+    CHECK(full_fields.at(40) == "0");          // tracker_is_prediction
+    CHECK(full_fields.at(41) == "0");          // tracker_coast_frames
+    CHECK(lost_fields.at(34) == "SEARCHING");  // tracker_lock_state
+    CHECK(lost_fields.at(41) == "0");          // tracker_coast_frames
     std::filesystem::remove(p);
 }
 

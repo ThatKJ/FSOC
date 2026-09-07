@@ -1,0 +1,22 @@
+TinyBeaconNet evaluation (test split)
+====================================
+checkpoint          : models/checkpoints/best.pt
+presence threshold  : 0.95  (calibrated on val, fp_rate<=0.02)
+param count         : 27282
+
+OVERALL  det_rate=0.4044  fp_rate=0.0133  centroid_MAE=8.699px  (n=1200)
+
+stratified:
+  clean_easy (difficulty<0.2)       n=202   det=0.474  fp=0.000  MAE=1.874px
+  mid (0.2<=difficulty<0.5)         n=812   det=0.399  fp=0.009  MAE=10.888px
+  hard (difficulty>=0.5)            n=186   det=0.322  fp=0.029  MAE=11.269px
+  low_snr (snr<15)                  n=318   det=0.111  fp=0.013  MAE=2.676px
+  bright_distractor                 n=356   det=0.404  fp=0.022  MAE=8.722px
+  optical_none                      n=544   det=0.413  fp=0.000  MAE=7.640px
+  optical_gaussian_blur             n=291   det=0.356  fp=0.013  MAE=15.391px
+  optical_defocus                   n=193   det=0.421  fp=0.019  MAE=6.212px
+  optical_motion_blur               n=172   det=0.440  fp=0.043  MAE=5.327px
+  target_absent                     n=300   det=nan  fp=0.013  MAE=nanpx
+
+python latency (torch CPU): mean=3.16ms  p95=3.79ms  max=6.19ms  (316 fps)
+NOTE: deploy latency is measured by the C++ OpenCV-DNN path (fsoc_ai_validation).

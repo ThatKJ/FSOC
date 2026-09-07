@@ -72,6 +72,40 @@ enum class DemoScenario {
 [[nodiscard]] const std::vector<DemoScenario>& all_demo_scenarios();
 
 // ---------------------------------------------------------------------------
+// Demo disturbance presets  (MVP-V2 Phase J — additive, presentation-facing)
+// ---------------------------------------------------------------------------
+//
+// Deterministic, NAMED one-command demo conditions -- NOT a UI editor and not
+// a new degree of freedom for a caller to hand-tune. Each preset composes
+// EXISTING, already-validated knobs (a DemoScenario base trajectory,
+// PerceptionMode, tracker_enabled, DemoDisturbanceConfig) into one ready-to-
+// run bundle. Every preset is grounded in a specific measured finding from
+// docs/MVP_ABLATION.md (Phase E/F/G) -- see
+// demo_disturbance_scenario_description() for the mapping, and DECISIONS.md
+// ADR-020 for why each preset picks the perception/tracker config it does.
+enum class DemoDisturbanceScenario {
+    Normal,         // Classical, tracker off, no disturbance -- the calm baseline
+    Noise,          // Classical, tracker off, additive read noise (Stage-4 LowSnr: unaided Classical already copes)
+    Occlusion,      // Hybrid+Tracker, a short (2-frame) occlusion window -- bridged (Phase G DROPOUT_2_FRAME)
+    Clutter,        // Hybrid+Tracker, a bright random distractor every frame -- false-lock mitigation (Phase E/F)
+    Reacquisition,  // Hybrid+Tracker, a long occlusion window -- full Lost -> fresh reacquire (Phase G DROPOUT_LONGER)
+};
+
+[[nodiscard]] std::string_view to_string(DemoDisturbanceScenario scenario) noexcept;
+
+// Short CLI token: one of "normal", "noise", "occlusion", "clutter", "reacquisition".
+[[nodiscard]] std::string_view demo_disturbance_scenario_token(DemoDisturbanceScenario scenario) noexcept;
+
+// One-line human description (what it demonstrates and which finding it's
+// grounded in) used by `fsoc_demo --help`.
+[[nodiscard]] std::string_view demo_disturbance_scenario_description(DemoDisturbanceScenario scenario) noexcept;
+
+[[nodiscard]] std::optional<DemoDisturbanceScenario> parse_demo_disturbance_scenario(std::string_view text);
+
+// All five presets in enum order (for --help and tests).
+[[nodiscard]] const std::vector<DemoDisturbanceScenario>& all_demo_disturbance_scenarios();
+
+// ---------------------------------------------------------------------------
 // DemoScenarioPlan — what a scenario expands into
 // ---------------------------------------------------------------------------
 //
@@ -219,6 +253,26 @@ public:
     // Demo knob: override the scenario's validated duration (still fixed 50 Hz).
     // Throws std::invalid_argument if duration_s is not finite and > 0.
     DemoSession(DemoScenario scenario, double duration_s);
+    // Additive (Stage 3): same as above, with the perception seam overridden.
+    // `mode == PerceptionMode::Classical` is bit-identical to the constructor
+    // above. `ai_detector` is required (throws std::invalid_argument via
+    // SimulationRunnerConfig::validate()) whenever mode != Classical.
+    // `tracker_enabled` (P0-v2, additive): default false is bit-identical to
+    // this constructor's pre-tracker behaviour; true layers TargetTracker
+    // (default TargetTrackerConfig, tracker_min_confidence_to_steer = 0.4)
+    // after whichever perception mode is selected -- see
+    // include/fsoc/target_tracker.hpp and docs/MVP_ABLATION.md.
+    DemoSession(
+        DemoScenario scenario, double duration_s, PerceptionMode mode,
+        std::optional<AiBeaconDetectorConfig> ai_detector = std::nullopt, bool tracker_enabled = false);
+
+    // Phase J: one of the five named, deterministic disturbance presets
+    // (see DemoDisturbanceScenario above) -- composes an existing base
+    // scenario + perception mode + tracker_enabled + disturbance config.
+    // `ai_detector` is required for the presets that use Hybrid (Occlusion,
+    // Clutter, Reacquisition); Normal/Noise use Classical and ignore it.
+    explicit DemoSession(
+        DemoDisturbanceScenario preset, std::optional<AiBeaconDetectorConfig> ai_detector = std::nullopt);
 
     DemoSession(const DemoSession&) = delete;
     DemoSession& operator=(const DemoSession&) = delete;

@@ -1,0 +1,24 @@
+TinyBeaconNet training summary
+=============================
+dataset            : generated/ai_dataset
+seed               : 26169
+device             : mps
+trainable params   : 27,282 (0.027 M)
+epochs run         : 21 (best val at epoch 9)
+wall time          : 762.1 s
+lambda p / h       : 1.0 / 1.0
+heatmap pos-weight : 80.0  (foreground-weighted MSE; ADR-017)
+presence pooling   : global max
+checkpoint criterion: min val_total = lambda_p*BCE(presence) + lambda_h*weighted_MSE(heatmap)
+
+best-val metrics (threshold 0.5):
+  presence precision : 0.8252
+  presence recall    : 0.9233
+  presence F1        : 0.8715
+  false-positive rate: 0.5867
+  centroid MAE       : 45.1043 px
+  centroid RMSE      : 158.4532 px
+  confusion tp/fp/tn/fn: 831/176/124/69
+
+next: python tools/ai/eval_beacon_net.py --dataset generated/ai_dataset --checkpoint models/checkpoints/best.pt
+      python tools/ai/export_onnx.py --checkpoint models/checkpoints/best.pt

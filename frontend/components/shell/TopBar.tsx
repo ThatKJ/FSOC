@@ -21,10 +21,16 @@ export function TopBar() {
     <header className="fixed left-0 right-0 top-0 z-50 flex h-[48px] items-center justify-between border-b border-outline-variant bg-surface-container-lowest px-margin-md">
       <div className="flex items-baseline gap-margin-md">
         <span className="font-display-telem text-headline-sm tracking-widest text-on-surface">
-          IRODOV // FSOC ALIGNMENT
+          FSOC ALIGNMENT
         </span>
         <span className="border-l border-outline-variant pl-margin-md font-label-xs text-label-xs uppercase tracking-tight text-on-surface-variant">
           SIH26169
+        </span>
+        <span
+          className="border-l border-outline-variant pl-margin-md font-label-xs text-label-xs uppercase tracking-tight text-tertiary"
+          title="Every value on this screen comes from the deterministic C++ simulation (SyntheticCameraRenderer) — no physical camera, beacon, or pan/tilt hardware is connected."
+        >
+          Simulation
         </span>
       </div>
 
@@ -47,7 +53,7 @@ export function TopBar() {
             )}
           />
           <span className="font-label-xs text-label-xs uppercase text-on-surface">
-            {uplinkOk ? "Uplink Active" : "Link Fault"}
+            {uplinkOk ? "Sim Feed Active" : "Sim Feed Fault"}
           </span>
         </div>
         <div className="ml-margin-sm flex h-8 w-8 items-center justify-center rounded-full bg-primary">

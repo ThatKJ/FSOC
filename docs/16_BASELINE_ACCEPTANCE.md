@@ -27,7 +27,7 @@ Artifacts are written to `generated/step10/` (git-ignored; never committed):
 generated/step10/
 ├── VALIDATION_REPORT.md          # generated evidence (config, per-scenario checks, verdict)
 ├── static.csv  linear.csv  sinusoidal.csv  fov_edge.csv  saturation.csv
-├── loss_reentry.csv  open_loop.csv  closed_loop.csv          # 27-column TelemetryRecord CSVs
+├── loss_reentry.csv  open_loop.csv  closed_loop.csv          # 34-column TelemetryRecord CSVs (27 core + 7 Stage-3 perception fields)
 ├── static_{initial,mid,final}.png   linear_{initial,mid,final}.png
 ├── sinusoidal_{t00,t05,t10,t15}.png   fov_edge_{initial,final}.png
 ├── saturation_{initial,final}.png     loss_{before,lost,reacquired}.png

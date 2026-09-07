@@ -9,18 +9,25 @@
 #include <cmath>
 #include <cstddef>
 #include <iostream>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <vector>
 
+#include "fsoc/ai_beacon_detector.hpp"
 #include "fsoc/camera.hpp"
 #include "fsoc/config.hpp"
 #include "fsoc/demo.hpp"
 #include "fsoc/geometry.hpp"
+#include "fsoc/perception.hpp"
 #include "fsoc/simulation_runner.hpp"
 #include "fsoc/telemetry.hpp"
 #include "fsoc/trajectory.hpp"
 #include "fsoc/validation.hpp"
+
+#ifndef FSOC_PROJECT_SOURCE_DIR
+#error "FSOC_PROJECT_SOURCE_DIR must be defined by CMakeLists.txt"
+#endif
 
 namespace {
 
@@ -634,6 +641,187 @@ void test_non_interference() {
     }
 }
 
+// ---- Stage-3 perception-mode-aware DemoSession constructor (additive) ----
+
+// PerceptionMode::Classical through the new 4-arg constructor must be
+// bit-identical to the existing 2-arg constructor -- the additive overload
+// changes nothing about the frozen default demo path.
+void test_perception_aware_constructor_classical_matches_default() {
+    for (const DemoScenario scenario : fsoc::all_demo_scenarios()) {
+        const double duration = 1.0;  // short, deterministic
+        DemoSession baseline{scenario, duration};
+        DemoSession explicit_classical{scenario, duration, fsoc::PerceptionMode::Classical};
+
+        bool identical = true;
+        while (!baseline.finished() && !explicit_classical.finished() && identical) {
+            (void)baseline.step();
+            (void)explicit_classical.step();
+            identical = step_results_equal(baseline.last_step_result(), explicit_classical.last_step_result());
+        }
+        CHECK(identical);
+        CHECK(baseline.finished() == explicit_classical.finished());
+    }
+}
+
+// PerceptionMode::Hybrid must be REQUIRED to supply an ai_detector config
+// (SimulationRunnerConfig::validate() enforces this, Stage 3) -- the demo
+// constructor does not weaken that.
+void test_perception_aware_constructor_requires_ai_detector_for_hybrid() {
+    bool threw = false;
+    try {
+        DemoSession session{DemoScenario::StaticAcquisition, 1.0, fsoc::PerceptionMode::Hybrid};
+        (void)session;
+    } catch (const std::invalid_argument&) {
+        threw = true;
+    } catch (...) {
+    }
+    CHECK(threw);
+}
+
+// Hybrid mode, given a valid model config, runs end-to-end and produces real
+// (not default-constructed) perception telemetry.
+void test_perception_aware_constructor_hybrid_runs_end_to_end() {
+    fsoc::AiBeaconDetectorConfig ai_config{};
+    ai_config.model_path = std::string(FSOC_PROJECT_SOURCE_DIR) + "/models/tiny_beacon_net.onnx";
+    ai_config.presence_threshold = 0.95;
+
+    DemoSession session{DemoScenario::StaticAcquisition, 1.0, fsoc::PerceptionMode::Hybrid, ai_config};
+    bool saw_hybrid_mode = false;
+    bool saw_any_ai_candidate = false;
+    while (!session.finished()) {
+        (void)session.step();
+        const fsoc::TelemetryRecord& t = session.last_telemetry();
+        if (t.perception_mode == "HYBRID") {
+            saw_hybrid_mode = true;
+        }
+        if (t.ai_candidate_detected) {
+            saw_any_ai_candidate = true;
+            CHECK(t.ai_presence_probability.has_value());
+            CHECK(*t.ai_presence_probability >= 0.95);
+            CHECK(t.ai_inference_ms.has_value());
+        }
+    }
+    CHECK(saw_hybrid_mode);
+    CHECK(saw_any_ai_candidate);  // this scenario's beacon is clean/bright -> AI should fire at least once
+}
+
+// P0-v2: tracker_enabled defaults to false and must be bit-identical to a
+// DemoSession that never mentions it (the same additive-seam guarantee
+// SimulationRunner's own tracker_enabled default already has).
+void test_tracker_disabled_matches_default() {
+    for (const DemoScenario scenario : fsoc::all_demo_scenarios()) {
+        const double duration = 1.0;
+        DemoSession baseline{scenario, duration};
+        DemoSession explicit_disabled{scenario, duration, fsoc::PerceptionMode::Classical, std::nullopt, false};
+
+        bool identical = true;
+        while (!baseline.finished() && !explicit_disabled.finished() && identical) {
+            (void)baseline.step();
+            (void)explicit_disabled.step();
+            identical = step_results_equal(baseline.last_step_result(), explicit_disabled.last_step_result());
+        }
+        CHECK(identical);
+        CHECK(baseline.finished() == explicit_disabled.finished());
+    }
+}
+
+// tracker_enabled = true runs end-to-end through DemoSession and produces
+// real (non-default) tracker telemetry -- the CLI/frontend-facing seam
+// fsoc_demo --tracker uses.
+void test_tracker_enabled_runs_end_to_end() {
+    DemoSession session{DemoScenario::StaticAcquisition, 1.0, fsoc::PerceptionMode::Classical, std::nullopt, true};
+    bool saw_tracking_lock = false;
+    while (!session.finished()) {
+        (void)session.step();
+        const fsoc::TelemetryRecord& t = session.last_telemetry();
+        if (t.tracker_lock_state == "TRACKING") {
+            saw_tracking_lock = true;
+            CHECK(t.tracker_x_px.has_value());
+            CHECK(t.tracker_confidence.has_value());
+        }
+    }
+    CHECK(saw_tracking_lock);  // this scenario's beacon is clean -> the tracker should confirm a lock
+}
+
+// ---- Phase J: named disturbance presets -------------------------------
+
+// Every preset must construct and run to completion without throwing, using
+// a real AI detector config for the Hybrid-based presets (Occlusion,
+// Clutter, Reacquisition) and std::nullopt for the Classical-based ones
+// (Normal, Noise) -- exactly the contract documented on the constructor.
+void test_all_disturbance_presets_run_end_to_end() {
+    fsoc::AiBeaconDetectorConfig ai_config{};
+    ai_config.model_path = std::string(FSOC_PROJECT_SOURCE_DIR) + "/models/tiny_beacon_net.onnx";
+    ai_config.presence_threshold = 0.95;
+
+    for (const fsoc::DemoDisturbanceScenario preset : fsoc::all_demo_disturbance_scenarios()) {
+        DemoSession session{preset, ai_config};
+        std::size_t frames = 0;
+        while (!session.finished()) {
+            (void)session.step();
+            ++frames;
+        }
+        CHECK(frames == session.total_frames());
+        CHECK(frames > 0);
+    }
+}
+
+// Normal and Noise are documented as Classical, tracker off -- verify that
+// contract directly rather than trusting the description string.
+void test_normal_and_noise_presets_are_classical_tracker_off() {
+    for (const fsoc::DemoDisturbanceScenario preset :
+         {fsoc::DemoDisturbanceScenario::Normal, fsoc::DemoDisturbanceScenario::Noise}) {
+        DemoSession session{preset, std::nullopt};
+        CHECK(session.runner_config().perception_mode == fsoc::PerceptionMode::Classical);
+        CHECK(!session.runner_config().tracker_enabled);
+    }
+}
+
+// Occlusion/Clutter/Reacquisition are documented as Hybrid+Tracker --
+// verify that contract, and that each REQUIRES an ai_detector (the same
+// validation SimulationRunnerConfig already enforces for Hybrid mode).
+void test_hybrid_presets_require_ai_detector_and_enable_tracker() {
+    fsoc::AiBeaconDetectorConfig ai_config{};
+    ai_config.model_path = std::string(FSOC_PROJECT_SOURCE_DIR) + "/models/tiny_beacon_net.onnx";
+    ai_config.presence_threshold = 0.95;
+
+    for (const fsoc::DemoDisturbanceScenario preset :
+         {fsoc::DemoDisturbanceScenario::Occlusion, fsoc::DemoDisturbanceScenario::Clutter,
+          fsoc::DemoDisturbanceScenario::Reacquisition}) {
+        DemoSession session{preset, ai_config};
+        CHECK(session.runner_config().perception_mode == fsoc::PerceptionMode::Hybrid);
+        CHECK(session.runner_config().tracker_enabled);
+
+        bool threw = false;
+        try {
+            DemoSession missing_ai{preset, std::nullopt};
+            (void)missing_ai;
+        } catch (const std::invalid_argument&) {
+            threw = true;
+        } catch (...) {
+        }
+        CHECK(threw);
+    }
+}
+
+// The Occlusion preset's disturbance window must actually erase the beacon
+// (real, not-fabricated behaviour) for exactly the configured duration.
+void test_occlusion_preset_actually_occludes() {
+    fsoc::AiBeaconDetectorConfig ai_config{};
+    ai_config.model_path = std::string(FSOC_PROJECT_SOURCE_DIR) + "/models/tiny_beacon_net.onnx";
+    ai_config.presence_threshold = 0.95;
+
+    DemoSession session{fsoc::DemoDisturbanceScenario::Occlusion, ai_config};
+    bool saw_lost_frame = false;
+    while (!session.finished()) {
+        (void)session.step();
+        if (session.last_telemetry().tracking_state == fsoc::TrackingState::TargetLost) {
+            saw_lost_frame = true;
+        }
+    }
+    CHECK(saw_lost_frame);
+}
+
 }  // namespace
 
 int main() {
@@ -660,9 +848,18 @@ int main() {
     test_prior_steps_regression();
     test_pause_and_run_state();
     test_non_interference();
+    test_perception_aware_constructor_classical_matches_default();
+    test_perception_aware_constructor_requires_ai_detector_for_hybrid();
+    test_perception_aware_constructor_hybrid_runs_end_to_end();
+    test_tracker_disabled_matches_default();
+    test_tracker_enabled_runs_end_to_end();
+    test_all_disturbance_presets_run_end_to_end();
+    test_normal_and_noise_presets_are_classical_tracker_off();
+    test_hybrid_presets_require_ai_detector_and_enable_tracker();
+    test_occlusion_preset_actually_occludes();
 
     if (failures == 0) {
-        std::cout << "PASS: 23 Step-11 demo-packaging checks passed.\n";
+        std::cout << "PASS: 32 Step-11 demo-packaging checks passed.\n";
         return 0;
     }
     std::cerr << "FAILED: " << failures << " check(s).\n";

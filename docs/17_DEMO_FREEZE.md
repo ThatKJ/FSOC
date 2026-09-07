@@ -48,7 +48,7 @@ No machine-specific paths are hardcoded anywhere; CMake discovers OpenCV via
 ```bash
 # 1. clone
 git clone <repo-url>
-cd Team_Irodov_MVP
+cd FSOC
 
 # 2. dependencies (Apple Silicon or Intel; Homebrew picks the right prefix)
 brew install cmake ninja opencv
@@ -74,8 +74,10 @@ ctest --preset debug
 ./build/debug/fsoc_demo closed
 
 # CLI options:
+#   --mode <mode>          classical (default) | ai | hybrid (Stage-3 ONNX perception;
+#                          falls back to classical with a warning if the model is missing)
 #   --duration <seconds>   shorten/lengthen the run (demo knob only; still 50 Hz)
-#   --csv <path>           write the 27-column telemetry CSV
+#   --csv <path>           write the 34-column telemetry CSV
 #   --quiet                summary only, no per-frame lines
 
 # 8. one-shot reproducible bundle (validation + demos + visualization evidence)
@@ -89,7 +91,7 @@ All generated artifacts live under `generated/` (git-ignored — never committed
 | path | produced by | contents |
 |---|---|---|
 | `generated/step10/` | `step10_validation_smoke` | `VALIDATION_REPORT.md` + 8 per-scenario CSV + 19 annotated PNG |
-| `generated/demo/` | `fsoc_demo --csv ...` / `make demo` | `static_demo.csv`, `sinusoidal_demo.csv` (27-col telemetry) |
+| `generated/demo/` | `fsoc_demo --csv ...` / `make demo` | `static_demo.csv`, `sinusoidal_demo.csv` (34-col telemetry: 27 core + 7 Stage-3 perception fields) |
 | `generated/step9/` | `step9_visualization_smoke` | 28 annotated camera-view PNG frames (+ optional `.mp4`) |
 
 Regenerate everything at once with `make demo`.

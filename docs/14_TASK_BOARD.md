@@ -91,9 +91,23 @@
 - [x] `fsoc_step11_tests` — 23 checks; Step-10 `ValidationSuite` still overall PASS; baseline PID still 12/0/0
 - [x] `make demo` / `scripts/run_baseline_demo.sh` — validation + demos + Step-9 visualization; `docs/17_DEMO_FREEZE.md` + `docs/18_FRONTEND_DATA_CONTRACT.md`
 
-## Post-baseline
+## V2 — AI PERCEPTION (`feat/ai-perception`, post-`v1_baseline`; ADR-015 / ADR-016)
+- [x] `fsoc_ai_datagen` lib — `fsoc/ai_frame_synth.hpp` + `src/ai_frame_synth.cpp`; pure seeded domain-randomization synthesizer (8-stage frozen order), re-uses the analytic Gaussian beacon, no dependency on `fsoc_render`
+- [x] `generate_ai_dataset` CLI — contiguous disjoint train/val/test blocks, `sample_seed_for(26169, i)`, evenly-spaced negatives, JSONL manifests + `dataset.json`; output git-ignored
+- [x] `fsoc_ai_datagen_tests` — determinism / 20k collision-free seeds / positive-signal / empty-negative / negative-fraction / edge-clip / difficulty bounds
+- [x] `tools/ai/` PyTorch toolchain — `common.py` (frozen preprocess/heatmap/decode), `model.py` (TinyBeaconNet ~50k params), `dataset.py`, `train_beacon_net.py`, `eval_beacon_net.py`, `export_onnx.py`, `make_parity_fixture.py`
+- [x] `docs/19_AI_PERCEPTION_ARCHITECTURE.md`, `docs/20_AI_DATASET_AND_TRAINING.md`
+- [ ] train + val-calibrate threshold + `models/tiny_beacon_net.onnx` + `MODEL_CARD.md`
+- [ ] `fsoc_ai_perception` — `AiBeaconDetector` (OpenCV-DNN ONNX) + model-file validation + Python↔C++ parity tests
+- [ ] `HybridDetector` + `PerceptionMode` / `PerceptionSource` + config-driven policy
+- [ ] `SimulationRunner` perception seam (default Classical, bit-identical regression, Step-10 still PASS) + AI telemetry fields
+- [ ] `fsoc_ai_validation` — scenario families A–K, CLASSICAL vs AI vs HYBRID table, C++ inference latency
+- [ ] frontend AI integration (perception toggle, confidence/source/latency, heatmap overlay, benchmark + architecture views) + `docs/21_AI_VALIDATION.md`
+
+## Post-baseline (later phases — NOT this one)
+- [ ] spatio-temporal (3-frame) detector
 - [ ] Eigen-backed UKF
 - [ ] MPC
 - [ ] vibration PSD model
 - [ ] Zernike/phase disturbance
-- [ ] advanced detection
+- [ ] satellite ephemeris + SGP4 coarse pointing

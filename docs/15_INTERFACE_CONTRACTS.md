@@ -306,7 +306,7 @@ Layers stay distinct — do not alias them:
   `AcceptanceCheck` and, separately, tightens a real threshold past its measured value, and
   asserts `evaluate_passed()` and `ValidationSuiteResult::overall_passed` both become
   `false`. Step 10 is not a decorative always-green harness.
-- **Evidence.** Per-scenario 27-column `TelemetryRecord` CSV via `CsvTelemetryLogger`;
+- **Evidence.** Per-scenario 34-column `TelemetryRecord` CSV (27 core + 7 Stage-3 perception fields) via `CsvTelemetryLogger`;
   annotated PNGs via the Step-9 observer path only —
   `SyntheticCameraRenderer{config.renderer}.render(result.observation)` for the base frame,
   then `TrackingVisualizer::annotate()` — no drawing code is re-implemented.
@@ -384,3 +384,40 @@ Layers stay distinct — do not alias them:
   no destructive git ops, no hardcoded Homebrew paths) runs the Step-10 validation, the
   `static` and `sinusoidal` demos, and the Step-9 visualization evidence, then prints the
   artifact paths under `generated/` (git-ignored).
+
+## V2 AI perception contract (post-`v1_baseline`, additive — full detail in `docs/19`)
+
+- **The controller-facing contract is unchanged.** The learned detector emits the *same*
+  `std::optional<BeaconDetection>` (centroid-only, no fabricated confidence) as the classical
+  detector. `compute_tracking_error`, the PID law + gains, `PanTiltCamera`, actuator limits,
+  the frozen `SimulationRunner::step()` order, and the Step-10 gates are untouched.
+- **`fsoc_ai_datagen`** (`fsoc/ai_frame_synth.hpp` + `src/ai_frame_synth.cpp`) — dataset
+  tooling only, **not** in the control path. Links `fsoc::core` + OpenCV core/imgproc; like
+  `fsoc_perception` it must **not** depend on `fsoc_render`. `AiFrameSynthesizer::synthesize(
+  seed)` is a pure, portable, byte-reproducible function (all randomness via
+  `std::mt19937_64`). It re-uses the analytic Gaussian beacon model, never the renderer.
+- **`generate_ai_dataset`** (`apps/generate_ai_dataset.cpp`) — writes
+  `generated/ai_dataset/{train,val,test}` + JSONL label manifests + `dataset.json`. Splits
+  are contiguous, disjoint blocks of one global index space; per-sample seed
+  `sample_seed_for(dataset_seed, global_index)` ⇒ no cross-split leakage. Output git-ignored.
+- **Learned detector (`fsoc_ai_perception`, later stage).** `AiBeaconDetector::detect(const
+  cv::Mat&) → std::optional<AiBeaconDetection>` — pixels only (never `TargetState`,
+  trajectory, projected truth, `TrackingError`, controller state). `AiBeaconDetection`
+  wraps a `BeaconDetection` plus **diagnostic-only** `confidence` / `peak_confidence` /
+  `inference_ms`. Same input validation style as `BeaconDetector` (empty / non-`CV_8UC1`
+  → `std::invalid_argument`); constructor fails cleanly on a missing / malformed model.
+- **Perception seam.** `enum class PerceptionMode { Classical, AI, Hybrid }` on
+  `SimulationRunnerConfig`, **default `Classical`** (bit-identical to v1, regression-tested).
+  `enum class PerceptionSource { None, Classical, AI, HybridAgreement }` is **diagnostic
+  telemetry only** — never a `TrackingState` / `DemoRunState`, never read by the PID.
+- **Safe Hybrid policy (ADR-018, post-Stage-2, documentation only — Stage 3 not started).**
+  Under `PerceptionMode::Hybrid`, `PerceptionSource::AI` is **never emitted** — AI never
+  independently supplies the control-facing centroid, only confirms (case 1) or is superseded
+  by the classical centroid (case 2). An AI-only detection (case 3) and a classical/AI
+  disagreement (case 4) both resolve to `std::nullopt` with a diagnostic-only
+  `enum class PerceptionRejectionReason { NotApplicable, AiOnlyUnverified, DetectorDisagreement }`
+  — never a confidence-based override; the ADR-016 draft's `high_confidence_threshold` escape
+  hatch is retired. `agreement_radius_px` is frozen at **8.0 px** (one heatmap cell,
+  `INPUT_STRIDE`), not an ML threshold. Full policy table + evidence: `docs/19 §5`,
+  `DECISIONS.md` ADR-018. `PerceptionSource::AI` remains meaningful only under the separate,
+  explicit, non-default `PerceptionMode::AI` (diagnostic/benchmark mode) — unaffected by ADR-018.

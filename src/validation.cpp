@@ -255,20 +255,23 @@ void write_scenario_csv(
 void write_evidence_frames(
     const std::filesystem::path& dir,
     const std::string& stem,
-    const SimulationRunnerConfig& config,
     const RecordedRun& run,
     const std::vector<std::pair<std::size_t, std::string>>& frames,
     ValidationResult& out) {
     if (dir.empty()) {
         return;
     }
-    const SyntheticCameraRenderer renderer{config.renderer};
     const TrackingVisualizer visualizer{VisualizationConfig{}};  // observer-only, defaults
     for (const auto& [index, tag] : frames) {
         if (index >= run.step_results.size()) {
             continue;
         }
-        const cv::Mat base = renderer.render(run.step_results[index].observation);
+        // The EXACT frame the detector consumed this step (stored on the
+        // result) -- not a re-render from `observation`. A fresh re-render is
+        // only guaranteed identical while rendering has no noise/disturbance
+        // sources; using the stored frame keeps evidence screenshots honest
+        // once that stops being true.
+        const cv::Mat& base = run.step_results[index].rendered_frame;
         const cv::Mat annotated =
             visualizer.annotate(base, run.step_results[index], run.telemetry[index]);
         const std::filesystem::path path = dir / (stem + "_" + tag + ".png");
@@ -394,7 +397,7 @@ ValidationResult ValidationSuite::run_static_acquisition() {
         check_bool("system remains TRACKING", tel.back().tracking_state == TrackingState::Tracking));
 
     write_scenario_csv(evidence_dir_, "static", tel, r);
-    write_evidence_frames(evidence_dir_, "static", cfg, run,
+    write_evidence_frames(evidence_dir_, "static", run,
                           {{0, "initial"}, {tel.size() / 2, "mid"}, {tel.size() - 1, "final"}}, r);
     finalise(r, run, replay, cfg);
     return r;
@@ -422,7 +425,7 @@ ValidationResult ValidationSuite::run_slow_linear() {
     r.checks.push_back(check_le("lost frames", static_cast<double>(r.metrics.lost_frames), 0.0, "frames"));
 
     write_scenario_csv(evidence_dir_, "linear", run.telemetry, r);
-    write_evidence_frames(evidence_dir_, "linear", cfg, run,
+    write_evidence_frames(evidence_dir_, "linear", run,
                           {{0, "initial"}, {run.telemetry.size() / 2, "mid"},
                            {run.telemetry.size() - 1, "final"}},
                           r);
@@ -463,7 +466,7 @@ ValidationResult ValidationSuite::run_sinusoidal() {
 
     write_scenario_csv(evidence_dir_, "sinusoidal", run.telemetry, r);
     const std::size_t n = run.telemetry.size();
-    write_evidence_frames(evidence_dir_, "sinusoidal", cfg, run,
+    write_evidence_frames(evidence_dir_, "sinusoidal", run,
                           {{0, "t00"}, {n / 4, "t05"}, {n / 2, "t10"}, {3 * n / 4, "t15"}}, r);
     finalise(r, run, replay, cfg);
     return r;
@@ -505,7 +508,7 @@ ValidationResult ValidationSuite::run_near_fov_edge() {
     r.checks.push_back(check_lt("final centroid offset", last_pixel_offset_px(tel), 3.0, "px"));
 
     write_scenario_csv(evidence_dir_, "fov_edge", tel, r);
-    write_evidence_frames(evidence_dir_, "fov_edge", cfg, run,
+    write_evidence_frames(evidence_dir_, "fov_edge", run,
                           {{0, "initial"}, {tel.size() - 1, "final"}}, r);
     finalise(r, run, replay, cfg);
     return r;
@@ -550,7 +553,7 @@ ValidationResult ValidationSuite::run_actuator_saturation() {
         check_lt("final angular error", deg(r.metrics.final_angular_error_rad), 0.05, "deg"));
 
     write_scenario_csv(evidence_dir_, "saturation", tel, r);
-    write_evidence_frames(evidence_dir_, "saturation", cfg, run,
+    write_evidence_frames(evidence_dir_, "saturation", run,
                           {{0, "initial"}, {tel.size() - 1, "final"}}, r);
     finalise(r, run, replay, cfg);
     return r;
@@ -628,7 +631,7 @@ ValidationResult ValidationSuite::run_loss_and_reentry() {
 
     write_scenario_csv(evidence_dir_, "loss_reentry", tel, r);
     const std::size_t before = first_lost > 5 ? first_lost - 5 : 0;
-    write_evidence_frames(evidence_dir_, "loss", cfg, run,
+    write_evidence_frames(evidence_dir_, "loss", run,
                           {{before, "before"},
                            {std::min(first_lost, res.size() - 1), "lost"},
                            {std::min(reacq, res.size() - 1), "reacquired"}},
@@ -686,7 +689,7 @@ ValidationResult ValidationSuite::run_open_vs_closed() {
     write_scenario_csv(evidence_dir_, "open_loop", open_run.telemetry, r);  // overwrites csv_path
     r.csv_path = evidence_dir_.empty() ? std::filesystem::path{}
                                        : evidence_dir_ / "closed_loop.csv";
-    write_evidence_frames(evidence_dir_, "open_vs_closed", base, closed_run,
+    write_evidence_frames(evidence_dir_, "open_vs_closed", closed_run,
                           {{0, "t00"}, {closed_run.telemetry.size() / 2, "t10"}}, r);
 
     finalise(r, closed_run, closed_replay, base);
