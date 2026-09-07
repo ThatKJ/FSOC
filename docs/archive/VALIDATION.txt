@@ -1,3 +1,7 @@
+# ARCHIVED: a manually-appended, Step-1-era validation log. Fully superseded by
+# docs/16_BASELINE_ACCEPTANCE.md, docs/MVP_METRICS.md, and docs/SIH_MVP_FREEZE.md,
+# which are the current, canonical sources for measured results. Kept for history only.
+
 SIH26169 FSOC C++ starter validation
 
 Validated in packaging environment with CMake 3.31 / C++20:

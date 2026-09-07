@@ -1,3 +1,7 @@
+# ARCHIVED: a stale, manually-maintained file listing from early in the project. Does
+# not reflect the current repository tree (hundreds of files added since). Kept for
+# history only — use `git ls-files` for a current listing.
+
 .clang-format
 .clang-tidy
 .claude/agents/gnc-geometry-engineer.md

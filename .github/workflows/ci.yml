@@ -1,0 +1,76 @@
+name: Build & Test
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# Cancel superseded runs on the same ref (saves CI minutes on rapid pushes).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  cpp:
+    name: C++ (build + ctest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Ubuntu's apt cmake can lag the project's cmake_minimum_required (3.24);
+      # the pip wheel is always current and avoids guessing at the runner's
+      # preinstalled version.
+      - name: Install CMake + Ninja
+        run: python3 -m pip install --upgrade cmake ninja
+
+      - name: Install OpenCV (core, imgproc, imgcodecs, dnn)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libopencv-dev
+
+      - name: Configure (debug)
+        run: cmake --preset debug
+
+      - name: Build (debug)
+        run: cmake --build --preset debug
+
+      - name: Test
+        run: ctest --preset debug --output-on-failure
+
+  frontend:
+    name: Frontend (typecheck, lint, build, E2E)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Production build
+        run: npm run build
+
+      # playwright.config.ts uses channel:"chrome" (the system browser, not a
+      # Playwright-managed download) — install it explicitly rather than
+      # assuming it's preinstalled on the runner image.
+      - name: Install Google Chrome
+        uses: browser-actions/setup-chrome@v1
+        with:
+          chrome-version: stable
+
+      - name: End-to-end tests (Playwright, REPLAY fixtures)
+        run: npx playwright test
