@@ -1,3 +1,8 @@
+> **Archived.** Written at the very start of the project (Python→C++ starter-kit
+> conversion); the "63 files" count and asset list are historical, not current. Kept for
+> engineering-history continuity, not as a live reference — see `docs/README.md` for the
+> current documentation index.
+
 # Kit Manifest
 
 This is the C++20 replacement for the original Python FSOC Vibe Coding starter.

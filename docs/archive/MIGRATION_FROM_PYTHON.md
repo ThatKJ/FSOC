@@ -1,3 +1,6 @@
+> **Archived.** A one-time bookkeeping note from the original Python→C++20 conversion at
+> the very start of the project. Purely historical.
+
 # Migration From Python Starter
 
 The project has been converted to C++20.

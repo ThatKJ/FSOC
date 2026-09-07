@@ -1,4 +1,8 @@
-# 48-Hour MVP Checklist — C++20
+# FSOC Engineering Checklist — C++20
+
+(Originally the "48-Hour MVP Checklist" for the initial baseline sprint; retitled as
+the project grew through Stage 2-4 AI perception and P0-v2 state estimation. Content
+below is a chronological, `[x]`-per-milestone engineering log, not a to-do list.)
 
 - [x] CMake/C++20 skeleton
 - [x] Frozen coordinate convention
