@@ -99,8 +99,7 @@ limitations** below for exactly what this does and does not fix.
   <img src="frontend/public/demo/frame-static.png" alt="FSOC tracking view — Step-9 visualizer output, static acquisition scenario" width="640">
 </p>
 
-*Real Step-9 visualizer output (the same renderer/overlay code the frontend and CLI use)
-— not a mockup.*
+*Real Step-9 visualizer output from the deterministic C++ simulation — not a mockup.*
 
 Five self-contained, one-command, reproducible conditions (`docs/MVP_GOLDEN_DEMO.md` has
 the full 15-step judge walkthrough with narration):
