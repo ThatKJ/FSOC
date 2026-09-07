@@ -123,6 +123,19 @@ async function findRatioWithLockState(page, needle, { steps = 40, sliderLabel = 
   return null;
 }
 
+/** Same as findRatioWithLockState but scans from the END of the run backward
+ * -- for picking a converged/late frame that still carries a given lock
+ * state (e.g. a "hero" shot that is both post-convergence and TRACKING). */
+async function findLateRatioWithLockState(page, needle, { steps = 20, sliderLabel = "Timeline" } = {}) {
+  for (let i = steps; i >= 0; i--) {
+    const ratio = i / steps;
+    await seekToRatio(page, ratio, sliderLabel);
+    const text = await readEstimatorPanelText(page);
+    if (text && text.includes(needle)) return ratio;
+  }
+  return null;
+}
+
 // page.setContent() leaves the page on an about:blank origin, which Chromium
 // refuses to load file:// <img> sources from (cross-origin file access is
 // blocked). The collage pages embed real screenshots via file:// paths, so
@@ -198,6 +211,33 @@ function ablationHtml() {
       <tr><td>D. Hybrid + Tracker (V2)</td><td>77.05%</td><td class="num good">9</td><td class="num">106.6</td></tr>
     </table>
     <div class="foot">A → B and C → D: adding the state estimator cuts severe outliers by ~99.5% in both cases — the estimator, not the Classical/AI fusion policy, neutralizes this failure mode. Real, disclosed coverage cost: ~20 points. A temporally coherent moving distractor still defeats this mitigation completely (docs/MVP_ABLATION.md §6) — not claimed solved.</div>
+  </div></body></html>`;
+}
+
+function openClosedLoopHtml() {
+  return `<!doctype html><html><head><meta charset="utf-8"><style>${PAGE_CSS}
+    .compare { display:flex; align-items:center; justify-content:center; gap:0; flex:1; }
+    .cbox { border:2px solid #30363d; border-radius:12px; padding:44px 56px; background:#0d1117; width:520px; text-align:center; }
+    .cbox.bad { border-color:#f85149; }
+    .cbox.good { border-color:#7ee787; }
+    .cbox .l { font-size:20px; color:#8b949e; text-transform:uppercase; letter-spacing:0.05em; }
+    .cbox .v { font-size:76px; font-weight:800; margin:16px 0; }
+    .cbox.bad .v { color:#f85149; }
+    .cbox.good .v { color:#7ee787; }
+    .cbox .s { font-size:16px; color:#6e7681; }
+    .carrow { display:flex; flex-direction:column; align-items:center; padding:0 44px; }
+    .carrow .sym { font-size:56px; color:#e6edf3; }
+    .carrow .mult { font-size:26px; font-weight:700; color:#7ee787; margin-top:10px; }
+  </style></head><body><div class="wrap">
+    <span class="badge">SIMULATION / DEVELOPMENT-MACHINE RESULTS</span>
+    <h1>FSOC — Open-Loop vs Closed-Loop Pointing Error</h1>
+    <h2>Same trajectory (sinusoidal target), same sensor model -- only the pan/tilt correction loop differs. docs/MVP_METRICS.md · docs/17_DEMO_FREEZE.md · step10_validation_smoke</h2>
+    <div class="compare">
+      <div class="cbox bad"><div class="l">Open Loop</div><div class="v">6.4549°</div><div class="s">RMS pointing error</div></div>
+      <div class="carrow"><div class="sym">→</div><div class="mult">×11.8</div></div>
+      <div class="cbox good"><div class="l">Closed Loop</div><div class="v">0.5461°</div><div class="s">RMS pointing error</div></div>
+    </div>
+    <div class="foot">Commit ${process.env.FSOC_COMMIT_SHA ?? ""} · ${new Date().toISOString().slice(0,10)} · Real step10_validation_smoke output (see screenshots/12_validation_terminal.png) · Simulation only, no physical hardware</div>
   </div></body></html>`;
 }
 
@@ -280,19 +320,23 @@ function terminalHtml(title, rawText) {
   </body></html>`;
 }
 
-function collageHtml(title, items) {
-  // items: [{src, label}]
+function collageHtml(title, items, headline) {
+  // items: [{src, label}]; headline (optional): {big, small} presentation stat line
   return `<!doctype html><html><head><meta charset="utf-8"><style>
     * { box-sizing:border-box; }
     body { margin:0; width:1920px; height:1080px; background:#0b0f14; font-family: ui-monospace, 'SF Mono', monospace; color:#e6edf3; }
     .wrap { padding:48px; height:100%; display:flex; flex-direction:column; }
-    h1 { font-size:32px; margin:0 0 28px; text-transform:uppercase; letter-spacing:0.05em; color:#7ee787; }
+    h1 { font-size:32px; margin:0 0 12px; text-transform:uppercase; letter-spacing:0.05em; color:#7ee787; }
+    .headline { text-align:center; margin:8px 0 28px; }
+    .headline .big { font-size:72px; font-weight:800; color:#7ee787; letter-spacing:0.02em; }
+    .headline .small { font-size:17px; color:#8b949e; margin-top:6px; }
     .row { display:flex; gap:28px; flex:1; }
     .cell { flex:1; display:flex; flex-direction:column; border:1px solid #21262d; border-radius:8px; overflow:hidden; background:#0d1117; }
     .cell img { width:100%; flex:1; object-fit:cover; display:block; }
     .cap { padding:14px 18px; font-size:18px; color:#8b949e; border-top:1px solid #21262d; text-transform:uppercase; letter-spacing:0.04em; }
   </style></head><body><div class="wrap">
     <h1>${title}</h1>
+    ${headline ? `<div class="headline"><div class="big">${headline.big}</div><div class="small">${headline.small}</div></div>` : ""}
     <div class="row">
       ${items.map(it => `<div class="cell"><img src="${it.src}"><div class="cap">${it.label}</div></div>`).join("")}
     </div>
@@ -307,25 +351,27 @@ async function main() {
   const browser = await chromium.launch({ channel: "chrome", headless: true });
   const page = await browser.newPage({ viewport: VIEWPORT, deviceScaleFactor: 2 });
 
-  // ---- 01 / 02 / 03: hero tracking + misalignment/converged pair ----
+  // ---- 02 / 03: misalignment/converged pair (Classical baseline -- matches
+  // the frozen docs/MVP_METRICS.md static-scenario numbers: 4.13deg -> 0.00deg) ----
   await page.goto(`${BASE_URL}/mission`);
   await selectEngineSource(page);
   await selectScenario(page, "Static Acquisition");
   await waitForRealTelemetry(page);
 
-  await seekToRatio(page, 0.02); // just past frame 0 — real, large initial error
+  // Click-based slider seeking has a 2px minimum offset (see seekToRatio) and
+  // can't land exactly on frame 0 -- use the transport's own "Restart" button
+  // (reset() -> seek(0)) to get the true initial frame / peak error, matching
+  // the on-screen MAX: 4.13 deg stat on /telemetry for this same run.
+  await page.getByRole("button", { name: "Restart" }).click();
+  await page.waitForTimeout(250);
   await shot(page, "02_initial_misalignment.png");
-  record({ filename: "02_initial_misalignment.png", purpose: "Real initial off-axis error before PID convergence", scenario: "static", source: "ENGINE", environment: "Simulation" });
+  record({ filename: "02_initial_misalignment.png", purpose: "Real initial off-axis error before PID convergence (frame 0, true peak -- matches docs/MVP_METRICS.md static 4.13deg)", scenario: "static", source: "ENGINE", environment: "Simulation" });
 
   await seekToRatio(page, 0.98); // converged
   await shot(page, "03_alignment_converged.png");
-  record({ filename: "03_alignment_converged.png", purpose: "Same run, converged: pointing error near zero", scenario: "static", source: "ENGINE", environment: "Simulation" });
+  record({ filename: "03_alignment_converged.png", purpose: "Same run, converged: pointing error at 0.0000 deg", scenario: "static", source: "ENGINE", environment: "Simulation" });
 
-  await seekToRatio(page, 0.6);
-  await shot(page, "01_mission_control_tracking.png");
-  record({ filename: "01_mission_control_tracking.png", purpose: "Hero: Mission Control actively tracking, mid-run", scenario: "static", source: "ENGINE", environment: "Simulation" });
-
-  // ---- 04: hybrid perception + state estimator, both real ----
+  // ---- 01 / 04: hero + hybrid perception + state estimator, both real ----
   await withEngineParams(page, { mode: "hybrid", tracker: "1" });
   await page.goto(`${BASE_URL}/mission`);
   await selectEngineSource(page);
@@ -335,6 +381,24 @@ async function main() {
   await seekToRatio(page, trackingRatio ?? 0.5);
   await shot(page, "04_hybrid_perception.png");
   record({ filename: "04_hybrid_perception.png", purpose: "Real Hybrid fusion + alpha-beta state estimator panels, both populated by the live engine", scenario: "static", source: "ENGINE (mode=hybrid&tracker=1)", environment: "Simulation" });
+
+  // Hero shot: same Hybrid+tracker run, AFTER convergence, with Hybrid
+  // perception + estimator telemetry visibly active (not the Classical-only
+  // frame the old hero used). Search backward from the end of the run for a
+  // late TRACKING frame -- Static Acquisition locks and holds, so this lands
+  // on a converged, low-error frame with the estimator panel populated.
+  const heroRatio = (await findLateRatioWithLockState(page, "TRACKING", { steps: 20 })) ?? trackingRatio ?? 0.6;
+  await seekToRatio(page, heroRatio);
+  const heroEstimatorText = await readEstimatorPanelText(page);
+  await shot(page, "01_mission_control_tracking.png");
+  record({
+    filename: "01_mission_control_tracking.png",
+    purpose: "Hero: Mission Control tracking after convergence, Hybrid perception + state estimator telemetry visibly active",
+    scenario: "static",
+    source: "ENGINE (mode=hybrid&tracker=1)",
+    environment: "Simulation",
+    note: heroEstimatorText ? `estimator panel at capture: ${heroEstimatorText.replace(/\s+/g, " ").trim()}` : "estimator panel not present at capture ratio",
+  });
 
   // ---- 05 / 06: occlusion/coasting + reacquisition (real target-loss scenario + tracker) ----
   await page.goto(`${BASE_URL}/mission`);
@@ -426,6 +490,10 @@ async function main() {
   await tpage.screenshot({ path: path.join(METRICS, "11_ablation.png") });
   record({ filename: "metrics/11_ablation.png", purpose: "A/B/C ablation, real measured numbers", source: "docs/MVP_ABLATION.md" });
 
+  await tpage.setContent(openClosedLoopHtml());
+  await tpage.screenshot({ path: path.join(METRICS, "20_open_vs_closed_loop.png") });
+  record({ filename: "metrics/20_open_vs_closed_loop.png", purpose: "Open-loop vs closed-loop RMS pointing error, 11.8x improvement", source: "docs/MVP_METRICS.md, docs/17_DEMO_FREEZE.md, real step10_validation_smoke output" });
+
   await tpage.setContent(architectureHtml());
   await tpage.screenshot({ path: path.join(DIAGRAMS, "15_architecture.png") });
   record({ filename: "diagrams/15_architecture.png", purpose: "Implemented-only system architecture", source: "README.md architecture diagram" });
@@ -438,12 +506,16 @@ async function main() {
   const misPath = path.join(SHOTS, "02_initial_misalignment.png");
   const alPath = path.join(SHOTS, "03_alignment_converged.png");
   if (existsSync(misPath) && existsSync(alPath)) {
-    await gotoHtml(tpage, collageHtml("Misaligned → Aligned", [
-      { src: "file://" + misPath, label: "Initial misalignment" },
-      { src: "file://" + alPath, label: "Converged" },
-    ]));
+    await gotoHtml(tpage, collageHtml(
+      "Misaligned → Aligned",
+      [
+        { src: "file://" + misPath, label: "Initial misalignment" },
+        { src: "file://" + alPath, label: "Converged" },
+      ],
+      { big: "4.13° → 0.00°", small: "Real pointing error, Static Acquisition, Classical baseline (frame 0 → converged, same closed-loop run) — docs/MVP_METRICS.md" },
+    ));
     await tpage.screenshot({ path: path.join(DIAGRAMS, "18_before_after.png") });
-    record({ filename: "diagrams/18_before_after.png", purpose: "Before/after collage from real captured screenshots", source: "02_initial_misalignment.png + 03_alignment_converged.png" });
+    record({ filename: "diagrams/18_before_after.png", purpose: "Before/after collage from real captured screenshots, with the real 4.13deg -> 0.00deg pointing-error headline", source: "02_initial_misalignment.png + 03_alignment_converged.png" });
   }
   const trackPath = path.join(SHOTS, "07_loss_scenario_tracking.png");
   const coastPath = path.join(SHOTS, "05_occlusion_coasting.png");

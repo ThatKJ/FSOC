@@ -1,6 +1,6 @@
 # FSOC — SIH 2026 PPT Shortlist
 
-Ranked from all 17 real captured assets. "I would rather receive 8 exceptional, truthful
+Ranked from all 18 real captured assets. "I would rather receive 8 exceptional, truthful
 screenshots than 30 mediocre ones" — this list picks the 8 that carry the deck. Every image
 below was opened and visually verified before being included (see the final evidence-pack
 report for what that review caught and fixed).
@@ -11,51 +11,52 @@ Paths are relative to `presentation_assets/`.
 
 ### 1. `screenshots/01_mission_control_tracking.png`
 - **Slide:** Opening / hero
-- **Proves:** A real, working, closed-loop tracking UI exists — not a mockup or slide deck. Live telemetry rail, real crosshair-on-beacon lock.
-- **Does NOT prove:** Accuracy, robustness, or AI capability — it's a single mid-run frame. Pair with metrics/ablation for that.
+- **Proves:** A real, working, closed-loop tracking UI exists — not a mockup. Captured after convergence (pointing error 0.0000°) with Hybrid perception (MODE: HYBRID) and the alpha-beta state estimator (LOCK STATE: TRACKING, CONFIDENCE 1.00) both visibly active in the same frame.
+- **Does NOT prove:** AI accuracy or robustness in isolation — it's a single converged frame. Pair with `20_open_vs_closed_loop.png` and `19_failure_recovery.png` for that. Note: PERCEPTION SOURCE reads CLASSICAL for this specific frame — that's the Safe Hybrid fusion's real, safety-gated per-frame decision, not a UI limitation; be ready to explain it if asked.
 
 ### 2. `diagrams/16_system_story.png`
 - **Slide:** "How FSOC works" (early, right after the problem statement)
 - **Proves:** The SEE → ESTIMATE → PREDICT → CORRECT closed loop is the organizing concept, and each stage maps to real implemented code.
-- **Does NOT prove:** That any specific stage works well — it's a concept diagram, not measured evidence. Follow immediately with 04 and 19 as proof.
+- **Does NOT prove:** That any specific stage works well — it's a concept diagram, not measured evidence. Follow immediately with 01 and 19 as proof.
 
-### 3. `screenshots/04_hybrid_perception.png`
-- **Slide:** AI / Hybrid perception + state estimation
-- **Proves:** The Safe Hybrid fusion (Classical + TinyBeaconNet) and the alpha-beta state estimator are both real, running, and populated by live engine data in the same frame — not two separate demos stitched together.
-- **Does NOT prove:** AI accuracy in isolation — the panel shows fusion output and estimator state, not a raw model benchmark (that's `metrics/10_metrics_summary.png`'s AI-latency card). Also disclose: reached via route interception on the app's already-shipped API (no UI toggle exists yet) — see `manifest.json` caveat.
+### 3. `metrics/20_open_vs_closed_loop.png`
+- **Slide:** Headline quantitative result
+- **Proves:** The single easiest number in the whole pack for a judge to remember — Open Loop 6.4549° RMS → Closed Loop 0.5461° RMS, an 11.8× improvement, same trajectory and sensor model, only the correction loop differs. Sourced from real, committed validation output (`docs/MVP_METRICS.md`, and the actual `step10_validation_smoke` terminal line in `12_validation_terminal.png`).
+- **Does NOT prove:** Real-world / hardware performance — explicitly labeled "SIMULATION / DEVELOPMENT-MACHINE RESULTS" on the graphic itself. State that label out loud when presenting.
 
-### 4. `diagrams/19_failure_recovery.png`
+### 4. `diagrams/18_before_after.png`
+- **Slide:** Convergence proof
+- **Proves:** The real, on-screen pointing-error change for one closed-loop run — 4.13° (true frame-0 peak) → 0.00° (converged) — with a headline number large enough to read from the back of a room, backed by the two real screenshots underneath it.
+- **Does NOT prove:** Anything beyond one scenario/run — pair with `20_open_vs_closed_loop.png` for the aggregate open-vs-closed comparison.
+
+### 5. `diagrams/19_failure_recovery.png`
 - **Slide:** Robustness / failure recovery
 - **Proves:** The system detects target loss, coasts on a predicted position instead of losing lock outright, and reacquires — all three frames from one deterministic run, so the sequence is a real observed trajectory, not assembled from unrelated moments.
-- **Does NOT prove:** That every occlusion is survivable — this is one scenario/seed. The ablation table (`metrics/11_ablation.png`) gives the aggregate, disclosed picture including where this mitigation still fails (a coherent moving distractor).
-
-### 5. `metrics/10_metrics_summary.png`
-- **Slide:** Measured results
-- **Proves:** Quantitative, reproducible numbers — test pass rates, the ~99.5% severe-outlier reduction, real AI inference latency — all sourced from a committed doc, not invented for the deck.
-- **Does NOT prove:** Real-world / hardware performance — explicitly labeled "SIMULATION / DEVELOPMENT-MACHINE RESULTS" on the graphic itself. State that label out loud when presenting.
+- **Does NOT prove:** That every occlusion is survivable — this is one scenario/seed. `metrics/11_ablation.png` gives the aggregate, disclosed picture including where this mitigation still fails (a coherent moving distractor).
 
 ## STRONG OPTIONAL (3)
 
-### 6. `metrics/11_ablation.png`
-- **Slide:** Why the state estimator matters (mechanism slide, follows #4)
+### 6. `metrics/10_metrics_summary.png`
+- **Slide:** Measured results (broader summary, if the deck has room for both 20 and a fuller card grid)
+- **Proves:** Quantitative, reproducible numbers beyond the headline RMS stat — test pass rates, severe-outlier reduction, real AI inference latency — all sourced from a committed doc.
+- **Does NOT prove:** Real-world / hardware performance — same SIMULATION label caveat as #3.
+
+### 7. `screenshots/04_hybrid_perception.png`
+- **Slide:** AI / Hybrid perception + state estimation (technical backup / deep-dive to 01)
+- **Proves:** The Safe Hybrid fusion and state estimator panels populated by live engine data, captured mid-run rather than post-convergence.
+- **Does NOT prove:** Anything additional beyond what 01 already shows — use this only if the deck has a dedicated AI slide separate from the hero.
+
+### 8. `metrics/11_ablation.png`
+- **Slide:** Why the state estimator matters (mechanism slide, follows #5)
 - **Proves:** The estimator — not the Classical/AI fusion choice — is what neutralizes the severe-outlier failure mode (A→B and C→D both drop ~99.5%). Also proves intellectual honesty: the footer discloses the coverage cost and the still-unsolved clutter case.
 - **Does NOT prove:** That coverage cost is free — 77% vs 99.7% coverage is a real, disclosed tradeoff; don't let a judge assume otherwise.
-
-### 7. `diagrams/18_before_after.png`
-- **Slide:** Convergence proof (compact 2-panel alternative if slide count is tight)
-- **Proves:** The same PID loop that appears in 02/03 individually, in one glance.
-- **Does NOT prove:** Anything beyond what 02+03 already show — use this OR the pair, not both, to avoid redundancy.
-
-### 8. `screenshots/12_validation_terminal.png`
-- **Slide:** Engineering rigor / "this is tested" slide
-- **Proves:** 17/17 CTest suites and 7/7 Step-10 baseline-acceptance scenarios genuinely pass — real terminal output, not retyped text.
-- **Does NOT prove:** Coverage completeness — passing tests confirm the tested behaviors are correct, not that all behaviors are tested.
 
 ## TECHNICAL BACKUP (use only if a judge asks a follow-up question)
 
 | File | Use when a judge asks... |
 |---|---|
 | `diagrams/15_architecture.png` | "What's the actual system architecture / module breakdown?" |
+| `screenshots/12_validation_terminal.png` | "Can I see the raw test output, not just a summary graphic?" |
 | `screenshots/13_hybrid_cli_demo.png` | "Does this run outside the browser / can I see the raw engine output?" |
 | `screenshots/08_error_convergence.png` | "Can I see all the telemetry channels, not just the summary?" |
 | `screenshots/09_perception_frame.png` | "What does the raw simulated camera frame look like?" |

@@ -9,7 +9,7 @@ pack is fabricated, hand-edited, or randomly generated. See `manifest.json` for 
 machine-readable record (one entry per asset, including the two items that could not be
 truthfully produced).
 
-Captured at commit `9f286f4` (`main`, 2026-09-07), simulation only — no physical camera,
+Captured at commit `94521a5` (`main`, 2026-09-07), simulation only — no physical camera,
 beacon, or pan/tilt hardware exists in this repository.
 
 Regenerate with:
@@ -24,8 +24,8 @@ FSOC_COMMIT_SHA=$(git rev-parse --short HEAD) node scripts/capture-sih-assets.mj
 
 | # | File | Shows | Scenario | Data source | Mode |
 |---|------|-------|----------|-------------|------|
-| 01 | `01_mission_control_tracking.png` | Hero: Mission Control actively tracking mid-run | Static Acquisition | Live engine response | ENGINE |
-| 02 | `02_initial_misalignment.png` | Real large initial pointing error before convergence | Static Acquisition | Live engine response | ENGINE |
+| 01 | `01_mission_control_tracking.png` | Hero: Mission Control tracking after convergence, Hybrid perception + state estimator telemetry visibly active | Static Acquisition | Live engine response | ENGINE (`mode=hybrid&tracker=1`) |
+| 02 | `02_initial_misalignment.png` | Real true frame-0 pointing error (4.1275°) before any PID correction | Static Acquisition | Live engine response | ENGINE |
 | 03 | `03_alignment_converged.png` | Same run, converged near zero error | Static Acquisition | Live engine response | ENGINE |
 | 04 | `04_hybrid_perception.png` | Hybrid fusion + state estimator panels, real TRACKING lock | Static Acquisition | Live engine response | ENGINE (`mode=hybrid&tracker=1`) |
 | 07 | `07_loss_scenario_tracking.png` | Same loss-scenario run as 05/06, early TRACKING frame (collage support asset) | Target Loss & Re-entry | Live engine response | ENGINE (`mode=hybrid&tracker=1`) |
@@ -47,6 +47,7 @@ full reasoning on both.
 |------|-------|-------------|
 | `10_metrics_summary.png` | Consolidated real measured metrics (Step-10, CTest, Playwright, Stage-4 outliers, AI latency) | `docs/MVP_METRICS.md` |
 | `11_ablation.png` | A/B/C/D ablation table, real measured numbers | `docs/MVP_ABLATION.md` |
+| `20_open_vs_closed_loop.png` | Open Loop 6.4549° RMS → Closed Loop 0.5461° RMS (×11.8), labeled SIMULATION | `docs/MVP_METRICS.md`, `docs/17_DEMO_FREEZE.md`, real `step10_validation_smoke` output |
 
 ## Diagrams (`diagrams/`)
 
@@ -54,7 +55,7 @@ full reasoning on both.
 |------|-------|-------------|
 | `15_architecture.png` | Implemented-only system architecture, sim vs. future-hardware split | README.md architecture diagram |
 | `16_system_story.png` | SEE → ESTIMATE → PREDICT → CORRECT storytelling graphic | Current implementation |
-| `18_before_after.png` | Before/after collage from real screenshots 02+03 | `02_initial_misalignment.png` + `03_alignment_converged.png` |
+| `18_before_after.png` | Before/after collage, real screenshots 02+03 with a headline stat: 4.13° → 0.00° | `02_initial_misalignment.png` + `03_alignment_converged.png` |
 | `19_failure_recovery.png` | 3-panel failure-recovery collage, all panels from the SAME loss-scenario run | `07_loss_scenario_tracking.png` + `05_occlusion_coasting.png` + `06_reacquisition.png` |
 
 ## Simulation / hardware boundary
