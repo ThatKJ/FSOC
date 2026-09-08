@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>FSOC Beacon Display</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; font-family: ui-monospace, monospace; }
+  canvas { display: block; }
+  #controls {
+    position: fixed; left: 12px; top: 12px; padding: 10px 12px; background: rgba(20,20,20,0.85);
+    color: #ddd; font-size: 12px; border: 1px solid #444; border-radius: 4px; z-index: 10;
+  }
+  #controls.hidden { display: none; }
+  #controls label { display: block; margin-top: 6px; }
+  #controls input, #controls select { width: 160px; vertical-align: middle; }
+  #controls .row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  #hint { position: fixed; right: 12px; bottom: 12px; color: #555; font-size: 11px; z-index: 10; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="controls">
+  <div class="row"><strong>FSOC Beacon Display</strong><span>(press H to hide)</span></div>
+  <label>Size (px radius)
+    <input id="size" type="range" min="4" max="120" value="24">
+  </label>
+  <label>Brightness
+    <input id="brightness" type="range" min="80" max="255" value="255">
+  </label>
+  <label>Motion
+    <select id="motion">
+      <option value="static">Static</option>
+      <option value="horizontal">Horizontal sweep</option>
+      <option value="vertical">Vertical sweep</option>
+      <option value="sinusoidal">Sinusoidal (fig-8-ish)</option>
+    </select>
+  </label>
+  <label>Speed
+    <input id="speed" type="range" min="1" max="10" value="3">
+  </label>
+</div>
+<div id="hint">This is a real light source (a monitor) captured by a real camera --
+it is NOT an FSOC transmitter. See docs/PHONE_CAMERA_METRICS.md.</div>
+
+<script>
+// FSOC Beacon Display -- a real, physical light source for real-camera testing
+// (Phase 6 of the Mobile Phone Camera-in-the-Loop milestone). No hardware
+// dependency: any monitor works. NOT an optical-communication transmitter --
+// this is a bright, moving CV target for testing FSOC's real-camera-in-the-
+// loop perception/tracking pipeline, nothing more.
+const canvas = document.getElementById("c");
+const ctx = canvas.getContext("2d");
+const controls = document.getElementById("controls");
+
+function resize() {
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+}
+window.addEventListener("resize", resize);
+resize();
+
+const sizeEl = document.getElementById("size");
+const brightnessEl = document.getElementById("brightness");
+const motionEl = document.getElementById("motion");
+const speedEl = document.getElementById("speed");
+
+let hidden = false;
+window.addEventListener("keydown", (e) => {
+  if (e.key === "h" || e.key === "H") {
+    hidden = !hidden;
+    controls.classList.toggle("hidden", hidden);
+  }
+  if (e.key === "f" || e.key === "F") {
+    if (!document.fullscreenElement) document.documentElement.requestFullscreen();
+    else document.exitFullscreen();
+  }
+});
+
+function position(t, w, h, speed, motion) {
+  const margin = 0.15;
+  const ax = w * (1 - 2 * margin) / 2;
+  const ay = h * (1 - 2 * margin) / 2;
+  const cx = w / 2, cy = h / 2;
+  const omega = speed * 0.4;
+  switch (motion) {
+    case "horizontal":
+      return { x: cx + ax * Math.sin(t * omega), y: cy };
+    case "vertical":
+      return { x: cx, y: cy + ay * Math.sin(t * omega) };
+    case "sinusoidal":
+      return { x: cx + ax * Math.sin(t * omega), y: cy + ay * Math.sin(t * omega * 2.0) };
+    default:
+      return { x: cx, y: cy };
+  }
+}
+
+let start = performance.now();
+function frame(now) {
+  const t = (now - start) / 1000;
+  const w = canvas.width, h = canvas.height;
+
+  ctx.fillStyle = "#000";
+  ctx.fillRect(0, 0, w, h);
+
+  const r = Number(sizeEl.value);
+  const b = Number(brightnessEl.value);
+  const speed = Number(speedEl.value);
+  const motion = motionEl.value;
+  const { x, y } = position(t, w, h, speed, motion);
+
+  const grad = ctx.createRadialGradient(x, y, 0, x, y, r);
+  grad.addColorStop(0, `rgb(${b},${b},${b})`);
+  grad.addColorStop(1, "rgba(0,0,0,0)");
+  ctx.fillStyle = grad;
+  ctx.beginPath();
+  ctx.arc(x, y, r, 0, Math.PI * 2);
+  ctx.fill();
+
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

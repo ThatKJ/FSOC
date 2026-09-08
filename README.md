@@ -253,13 +253,30 @@ State these proactively — they're disclosed in `docs/SIH_MVP_FREEZE.md`, not b
 6. Evaluated at n=5 seeds per scenario (matches the frozen protocol) — real, not
    large-sample, statistics.
 
+## Mobile Phone Camera-in-the-Loop (optional, additive prototype)
+
+Alongside the fully-simulated demo above, `fsoc_live` (`apps/fsoc_live.cpp`) makes the
+**sensing side** real: a real phone/webcam frame, run through the exact same Classical +
+TinyBeaconNet + Safe Hybrid perception, P0-v2 state estimator, and PID controller the
+simulation uses — see `docs/PHONE_CAMERA_METRICS.md`. The **actuator side stays honestly
+virtual**: `VirtualPanTiltActuator` bookkeeps a commanded angle and drives no physical
+hardware. Every telemetry frame and the Mission Control view at `/mission/live` label this
+explicitly (`CAMERA SOURCE: REAL_PHONE_CAMERA`, `ACTUATOR: VIRTUAL`). This is a
+"real-camera-in-the-loop prototype," never a "physical pan/tilt tracking system" — see
+`docs/PHONE_CAMERA_METRICS.md`'s claim boundary and `docs/PHONE_CAMERA_GOLDEN_DEMO.md` to
+run it yourself (requires a real camera and, on macOS, granting an OS permission prompt).
+
 ## Hardware boundary
 
-Zero physical camera, beacon, servo, or pan/tilt hardware has been used anywhere in
-this project. Every number in this README comes from the deterministic C++ simulation
-on a desktop-class development machine (Apple M5). **No claim of embedded, flight, or
-real-time-on-target hardware performance is made or implied anywhere in this
-repository.** See `docs/MVP_METRICS.md §5` and `docs/SIH_MVP_FREEZE.md §6`.
+No physical beacon, servo, or pan/tilt actuator has been used anywhere in this project, and
+the frozen SIH MVP simulation above uses zero physical hardware of any kind. The one
+exception is the optional prototype directly above: it reads frames from a real camera, but
+still commands no physical actuator. Every measured number in the "Measured results" section
+above comes from the deterministic C++ simulation on a desktop-class development machine
+(Apple M5), not from the camera prototype. **No claim of embedded, flight, physical
+actuation, or real-time-on-target hardware performance is made or implied anywhere in this
+repository.** See `docs/MVP_METRICS.md §5`, `docs/SIH_MVP_FREEZE.md §6`, and
+`docs/PHONE_CAMERA_METRICS.md`.
 
 ## Repository structure
 
@@ -270,6 +287,7 @@ apps/               Executable simulation/demo/benchmark/evaluation programs
 tests/              Mathematical/unit validation (CTest)
 models/             Committed trained ONNX model + metadata (models/MODEL_CARD.md)
 tools/ai/           Offline Python training toolchain (NOT part of the C++ runtime)
+tools/beacon_display.html  Real, physical test-target page for the phone-camera prototype
 frontend/           Next.js Mission Control UI (reads real fsoc_demo telemetry)
 cmake/              Build policies
 .github/workflows/  CI (build + test, C++ and frontend)
