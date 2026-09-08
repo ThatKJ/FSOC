@@ -28,3 +28,8 @@ models/*.pth
 models/*.ckpt
 models/checkpoints/
 models/runs/
+
+# --- Mobile Phone Camera-in-the-Loop ---
+# Personal, hardware-specific camera calibration (your phone's FOV, not a
+# general default) — see docs/PHONE_CAMERA_METRICS.md "Camera calibration".
+configs/
