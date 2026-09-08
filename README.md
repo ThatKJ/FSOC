@@ -191,6 +191,20 @@ the session **"Simulation"** explicitly and reads "Sim Feed Active/Fault" (not
 ## Quick start
 
 ```bash
+./run_fsoc.sh
+```
+
+One command, one interactive menu — Simulation Demo, Phone Camera Demo, Camera Probe,
+Mission Control Only, Run Full Validation, Golden Phone Demo, or Build Everything. It
+builds only what's missing, never guesses a port (reads it from
+`frontend/package.json`), never touches a process it didn't start, and cleans up on
+Ctrl+C. Non-interactive: `./run_fsoc.sh simulation|phone|probe|ui|test|golden|build`.
+See `scripts/run_fsoc.sh --help` for every flag (`--rebuild`, `--no-browser`).
+
+<details>
+<summary>Prefer the manual, step-by-step commands? (what the launcher itself runs)</summary>
+
+```bash
 # --- one-time setup (macOS) ---
 xcode-select --install      # only if Command Line Tools are missing
 brew install cmake ninja opencv
@@ -214,6 +228,8 @@ Steps that need OpenCV are auto-skipped with a one-line CMake notice if it isn't
 installed — no Homebrew paths are hardcoded. Ubuntu/CI equivalents:
 `sudo apt-get install -y ninja-build libopencv-dev` (see `.github/workflows/ci.yml`,
 which runs this exact pipeline on every push/PR).
+
+</details>
 
 ## Validation
 
@@ -263,8 +279,10 @@ virtual**: `VirtualPanTiltActuator` bookkeeps a commanded angle and drives no ph
 hardware. Every telemetry frame and the Mission Control view at `/mission/live` label this
 explicitly (`CAMERA SOURCE: REAL_PHONE_CAMERA`, `ACTUATOR: VIRTUAL`). This is a
 "real-camera-in-the-loop prototype," never a "physical pan/tilt tracking system" — see
-`docs/PHONE_CAMERA_METRICS.md`'s claim boundary and `docs/PHONE_CAMERA_GOLDEN_DEMO.md` to
-run it yourself (requires a real camera and, on macOS, granting an OS permission prompt).
+`docs/PHONE_CAMERA_METRICS.md`'s claim boundary. Run it yourself with `./run_fsoc.sh phone`
+(or `./run_fsoc.sh golden` for the full narrated walkthrough,
+`docs/PHONE_CAMERA_GOLDEN_DEMO.md`) — requires a real camera and, on macOS, granting an OS
+permission prompt.
 
 ## Hardware boundary
 

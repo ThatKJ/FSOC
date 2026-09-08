@@ -33,3 +33,7 @@ models/runs/
 # Personal, hardware-specific camera calibration (your phone's FOV, not a
 # general default) — see docs/PHONE_CAMERA_METRICS.md "Camera calibration".
 configs/
+
+# --- FSOC launcher ---
+# Local, non-secret overrides (see fsoc.env.example, which IS committed).
+fsoc.env
