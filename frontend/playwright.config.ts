@@ -2,8 +2,14 @@ import { defineConfig, devices } from "@playwright/test";
 
 /**
  * E2E smoke tests for the FSOC mission-control frontend.
- * Runs against the production build on :4317 (deterministic REPLAY telemetry).
+ * Runs against the production build on :4317 (deterministic REPLAY telemetry)
+ * by default, or against a deployed URL (e.g. a Vercel Preview) when
+ * FSOC_BASE_URL is set -- see "Deployment smoke" below. The one test that
+ * needs the local C++ engine skips itself when it isn't reachable, so this
+ * same suite is safe to run against a public deployment with no C++ build.
  */
+const remote = !!process.env.FSOC_BASE_URL;
+
 export default defineConfig({
   testDir: "./tests/e2e",
   fullyParallel: true,
@@ -40,10 +46,14 @@ export default defineConfig({
       },
     },
   ],
-  webServer: {
-    command: "npm run start",
-    url: "http://localhost:4317",
-    reuseExistingServer: true,
-    timeout: 60_000,
-  },
+  // Only boot a local server when testing locally -- a remote FSOC_BASE_URL
+  // (production/preview deployment) needs no local build at all.
+  webServer: remote
+    ? undefined
+    : {
+        command: "npm run start",
+        url: "http://localhost:4317",
+        reuseExistingServer: true,
+        timeout: 60_000,
+      },
 });

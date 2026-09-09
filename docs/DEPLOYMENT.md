@@ -73,6 +73,23 @@ cd frontend && npm run dev
 See `docs/PHONE_CAMERA_GOLDEN_DEMO.md` and `docs/PHONE_CAMERA_TEST_PLAN.md` for the full
 walkthrough and camera setup.
 
+## Deployment smoke
+
+`frontend/tests/e2e/smoke.spec.ts` doubles as a deploy-safe smoke suite: point
+it at any deployed URL and it exercises the public routes, navigation,
+playback, and API error handling. The one test that needs the local C++
+engine (`engine mode ... reaches the C++ engine`) skips itself automatically
+when that engine isn't reachable, so the full suite is safe to run against a
+deployment that has no C++ build at all.
+
+```bash
+cd frontend
+FSOC_BASE_URL=https://<preview-or-prod-url> npx playwright test
+```
+
+Setting `FSOC_BASE_URL` also disables the config's local `webServer` — no
+local build or dev server is started when testing a remote deployment.
+
 ## Troubleshooting
 
 - **Deployed site shows `framework: null` / doesn't look like the app** — Root
