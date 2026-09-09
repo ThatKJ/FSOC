@@ -14,6 +14,7 @@ for what it covers.
 | [`PHONE_CAMERA_METRICS.md`](PHONE_CAMERA_METRICS.md) | Mobile Phone Camera-in-the-Loop: architecture, JSON telemetry schema, claim boundary, real-camera metrics |
 | [`PHONE_CAMERA_GOLDEN_DEMO.md`](PHONE_CAMERA_GOLDEN_DEMO.md) | The 15-step real-camera demo walkthrough (run yourself — needs a real camera) |
 | [`PHONE_CAMERA_TEST_PLAN.md`](PHONE_CAMERA_TEST_PLAN.md) | Automated (CTest) vs. manual (hardware-required) test split, with a PASS/FAIL checklist |
+| [`DEPLOYMENT.md`](DEPLOYMENT.md) | Public Vercel deployment architecture, project settings, and why the phone-camera prototype stays local-only |
 
 ## Architecture
 

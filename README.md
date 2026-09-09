@@ -6,6 +6,8 @@
 
 [![Build & Test](https://github.com/ThatKJ/FSOC/actions/workflows/ci.yml/badge.svg)](https://github.com/ThatKJ/FSOC/actions/workflows/ci.yml)
 ![C++20](https://img.shields.io/badge/C%2B%2B-20-blue)
+![Next.js 14](https://img.shields.io/badge/Next.js-14-black)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 FSOC detects an optical beacon through a virtual pan/tilt camera, fuses classical and
 neural (CNN) perception, estimates short-term target motion, and automatically commands
@@ -79,7 +81,7 @@ none is estimated or hand-picked. Full methodology and raw evidence:
 | | |
 |---|---|
 | Step-10 baseline acceptance | **7 / 7 PASS** |
-| C++ test suites (`ctest`) | **17 / 17** (100%) |
+| C++ test suites (`ctest`) | **22 / 22** (100%) |
 | Frontend end-to-end tests (Playwright) | **20 / 20** |
 | Severe (>50px) closed-loop outliers — Classical | 2,240 |
 | Severe closed-loop outliers — Classical + Tracker | 12 (**↓ ~99.5%**) |
@@ -188,6 +190,33 @@ Neither mode is a physical test bench — see **Hardware boundary**. The top bar
 the session **"Simulation"** explicitly and reads "Sim Feed Active/Fault" (not
 "Uplink") so it can never be misread as a live hardware/RF connection.
 
+## Working modes
+
+FSOC runs in more than one context, and each has a different, explicit camera/actuator
+boundary — never blurred, never silently upgraded to sound more impressive:
+
+| Mode | Camera | Actuator | Purpose |
+|---|---|---|---|
+| **Simulation** (`fsoc_demo`) | Synthetic (rendered) | Simulated | Deterministic development, evaluation, and the frozen SIH baseline. |
+| **Mission Control — REPLAY** | Synthetic (recorded) | Simulated | Public/offline viewing of a checked-in run — no C++ build required. |
+| **Mission Control — ENGINE** | Synthetic (live) | Simulated | Local viewing of `fsoc_demo` running live, streamed over `/api/simulation/:scenario`. |
+| **Phone camera-in-the-loop** (`fsoc_live`) | Real (phone/webcam) | Virtual (bookkept, drives nothing) | Proves the perception → estimation → control stack against a real image, locally. |
+| **Physical hardware** | Real | Real (physical pan/tilt) | **Not implemented.** Would replace `FrameSource` / `PanTiltCamera` behind the same interfaces (`docs/09_FUTURE_ARCHITECTURE.md`) — no such hardware exists in this repository today. |
+
+The public web deployment (see **Deployment** below) only ever serves the first two rows —
+it has no access to your camera or a local C++ process, and it never pretends otherwise.
+
+## Deployment
+
+The public site is a static/serverless Next.js deployment of `frontend/` — it shows the
+project, its architecture, and deterministic replay evidence produced by the real C++
+engine. It is **not** a backend for the phone-camera prototype: your Android camera and
+`fsoc_live` run on your own machine, and Vercel has no way to reach either. `/mission/live`
+detects the missing local session and shows a "run this locally" state instead of
+fabricating one — see the API route at `frontend/app/api/live-camera/route.ts`.
+
+Full architecture, project settings, and the local-vs-public split: **`docs/DEPLOYMENT.md`**.
+
 ## Quick start
 
 ```bash
@@ -212,7 +241,7 @@ brew install cmake ninja opencv
 # --- build + test the C++ engine ---
 cmake --preset debug
 cmake --build --preset debug
-ctest --preset debug                     # 17/17 suites
+ctest --preset debug                     # 22/22 suites
 
 # --- run the demo ---
 ./build/debug/fsoc_demo normal           # base scenarios: static|sinusoidal|loss|open|closed
@@ -236,7 +265,7 @@ which runs this exact pipeline on every push/PR).
 Three independent layers, all reproducible locally:
 
 ```bash
-ctest --preset debug                                                        # 17/17 C++ suites
+ctest --preset debug                                                        # 22/22 C++ suites
 ./build/debug/step10_validation_smoke                                       # 7/7 baseline gates
 cmake --preset release && cmake --build --preset release
 ./build/release/stage4_evaluation --out generated/ai_stage4                 # ~10-15 min, frozen protocol
@@ -324,4 +353,19 @@ generated/          Git-ignored run artifacts (CSV/PNG/JSON reports) — never c
 - **Every architecture/algorithm decision and its evidence** (20 ADRs): `DECISIONS.md`
 - **Frozen SIH MVP release state**: `docs/SIH_MVP_FREEZE.md`
 
-Read `CLAUDE.md` before asking an AI coding agent to modify this project.
+## Contributing
+
+Read `CLAUDE.md` before asking an AI coding agent to modify this project — it defines the
+module boundaries (`Environment` / `Trajectory` / `PanTiltCamera` / `Detector` /
+`Controller` / ... ), coordinate conventions, and the C++20/CMake-only build rules that
+keep the simulation mathematically traceable. Human contributions: open an issue or PR;
+keep changes to one module's boundary per commit, and add/update tests alongside any math
+change (`docs/16_AI_CODING_GUARDRAILS.md`).
+
+## Team
+
+**Team IRODOV** — Smart India Hackathon 2026, problem statement SIH26169.
+
+## License
+
+[MIT](LICENSE).
