@@ -2,9 +2,20 @@
 
 import { useEffect, useRef, useState } from "react";
 
+import Link from "next/link";
+
 import { Screen } from "@/components/shell/AppShell";
 import { Panel, PanelHeader, KeyValueRow, StatusSquare } from "@/components/ui/Panel";
 import { deg, fixed, px } from "@/lib/format";
+
+/** Button-styled link (not a real <button>, so it's safe to use inside/as an <a>). */
+function linkButtonClass(variant: "ghost" | "outline") {
+  const base =
+    "inline-flex items-center justify-center gap-margin-sm border px-margin-md py-margin-sm font-headline-sm text-headline-sm uppercase tracking-wider transition-colors";
+  return variant === "ghost"
+    ? `${base} border-outline-variant text-on-surface hover:border-primary hover:text-primary bg-surface`
+    : `${base} border-outline-variant text-on-surface hover:bg-surface-container hover:border-primary/60`;
+}
 
 /**
  * /mission/live — Mobile Phone Camera-in-the-Loop viewer.
@@ -115,17 +126,36 @@ export default function LiveCameraPage() {
       </div>
 
       {!frame && (
-        <Panel className="mt-margin-md flex flex-1 flex-col items-center justify-center gap-margin-sm p-margin-md text-center">
-          <span className="font-label-xs text-label-xs uppercase tracking-widest text-on-surface-variant">
-            No live session
+        <Panel className="mt-margin-md flex flex-1 flex-col items-center justify-center gap-margin-md p-margin-lg text-center">
+          <StatusSquare active={false} color="muted" />
+          <span className="font-headline-sm text-headline-sm uppercase tracking-widest text-on-surface">
+            Real-Camera Mode
           </span>
-          <span className="max-w-md font-data-mono text-data-mono text-on-surface-variant">
+          <p className="max-w-lg font-data-mono text-data-mono text-on-surface-variant">
+            This mode runs on your own machine because camera frames are processed by the
+            native FSOC C++ engine (<span className="text-on-surface">fsoc_live</span>), not by
+            this web server. This page polls a local telemetry file and will never fabricate a
+            reading — it shows this state honestly instead.
+          </p>
+          <span className="max-w-md font-data-mono text-[11px] text-on-surface-variant">
             {error ?? "Waiting for fsoc_live..."}
           </span>
-          <span className="max-w-lg font-data-mono text-[11px] text-on-surface-variant">
-            Run fsoc_live yourself (see docs/PHONE_CAMERA_GOLDEN_DEMO.md) — this page never
-            fabricates telemetry when no session is running.
-          </span>
+          <div className="mt-margin-sm flex flex-wrap items-center justify-center gap-margin-sm">
+            <Panel className="bg-surface px-margin-md py-margin-sm">
+              <code className="font-data-mono text-data-mono text-primary">./run_fsoc.sh phone</code>
+            </Panel>
+            <a
+              href="https://github.com/ThatKJ/FSOC/blob/main/docs/PHONE_CAMERA_GOLDEN_DEMO.md"
+              target="_blank"
+              rel="noreferrer"
+              className={linkButtonClass("ghost")}
+            >
+              Setup Guide
+            </a>
+            <Link href="/mission" className={linkButtonClass("outline")}>
+              View Public Replay
+            </Link>
+          </div>
         </Panel>
       )}
 
