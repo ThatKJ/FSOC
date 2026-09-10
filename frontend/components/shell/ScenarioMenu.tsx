@@ -33,23 +33,23 @@ export function ScenarioMenu() {
   const label = SCENARIOS[scenario].label;
 
   return (
-    <div ref={ref} className="relative">
+    <div ref={ref} className="relative w-full min-w-0 lg:w-auto">
       <button
         type="button"
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-label={`Active scenario: ${label}. Change scenario`}
         onClick={() => setOpen((v) => !v)}
-        className="flex items-center gap-margin-sm border border-outline-variant bg-surface-container px-margin-md py-unit transition-colors hover:border-primary/60"
+        className="flex w-full min-w-0 items-center gap-margin-sm border border-outline-variant bg-surface-container px-margin-md py-unit transition-colors hover:border-primary/60"
       >
         <span
           className={cn(
-            "h-2 w-2 bg-primary",
+            "h-2 w-2 shrink-0 bg-primary",
             status === "loading" ? "animate-pulse" : status === "error" && "bg-error",
           )}
         />
-        <span className="font-data-mono text-data-mono uppercase text-primary">{label}</span>
-        <ChevronDown className="h-3 w-3 text-on-surface-variant" strokeWidth={1.5} />
+        <span className="min-w-0 flex-1 truncate font-data-mono text-data-mono uppercase text-primary">{label}</span>
+        <ChevronDown className="h-3 w-3 shrink-0 text-on-surface-variant" strokeWidth={1.5} />
       </button>
 
       {open && (

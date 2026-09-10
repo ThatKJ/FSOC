@@ -41,7 +41,7 @@ export default function WorldPage() {
         </div>
 
         {/* view switch */}
-        <div className="absolute left-margin-md top-margin-md z-10 flex flex-col gap-gutter bg-surface-container/80 p-unit shadow-md backdrop-blur-md">
+        <div className="absolute left-margin-md top-margin-md z-10 flex max-w-[150px] flex-col gap-gutter bg-surface-container/80 p-unit shadow-md backdrop-blur-md lg:max-w-none">
           {VIEWS.map((vw) => {
             const Icon = vw.icon;
             const active = vw.id === view;
@@ -75,8 +75,9 @@ export default function WorldPage() {
           ))}
         </div>
 
-        {/* telemetry panel */}
-        <aside className="absolute bottom-margin-md right-margin-md top-margin-md z-20 flex w-[320px] flex-col overflow-hidden bg-surface-container/90 shadow-xl backdrop-blur-md">
+        {/* telemetry panel -- compact top-right card on mobile (leaves the 3D scene visible
+            underneath rather than covering it edge-to-edge); full right-side panel at lg: */}
+        <aside className="absolute right-margin-md top-margin-md z-20 flex max-h-[55%] w-[168px] flex-col overflow-hidden bg-surface-container/90 shadow-xl backdrop-blur-md lg:bottom-margin-md lg:top-margin-md lg:max-h-none lg:w-[320px]">
           <div className="flex items-center justify-between bg-surface-container-highest p-panel-padding">
             <span className="font-headline-sm text-headline-sm uppercase tracking-widest text-on-surface">
               Target Telemetry

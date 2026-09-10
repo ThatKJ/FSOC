@@ -16,7 +16,7 @@ export function TelemetryStream({ className }: { className?: string }) {
   return (
     <aside
       className={cn(
-        "flex w-[320px] shrink-0 flex-col overflow-y-auto border-l border-outline-variant bg-surface-container-low",
+        "flex w-full shrink-0 flex-col overflow-y-auto border-l-0 border-t border-outline-variant bg-surface-container-low lg:w-[320px] lg:border-l lg:border-t-0",
         className,
       )}
       data-testid="telemetry-stream"

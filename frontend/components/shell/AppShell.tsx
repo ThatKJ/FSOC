@@ -25,7 +25,7 @@ export function Screen({
 }) {
   return (
     <div
-      className={`flex h-[calc(100vh-48px)] w-full flex-col overflow-hidden ${
+      className={`flex min-h-[calc(100vh-48px)] w-full flex-col overflow-y-auto lg:h-[calc(100vh-48px)] lg:overflow-hidden ${
         pad ? "p-margin-md gap-margin-md" : ""
       } ${className}`}
     >
