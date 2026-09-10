@@ -70,7 +70,7 @@ export default function OverviewPage() {
             </button>
           </div>
 
-          <div className="absolute bottom-12 left-12 grid grid-cols-2 gap-x-8 gap-y-4">
+          <div className="mt-auto grid grid-cols-2 gap-x-8 gap-y-4 pt-12">
             <Stat label="System Status" value={status === "error" ? "LINK FAULT" : "NOMINAL"} tone={status === "error" ? "lost" : "primary"} pulse />
             <Stat label="Uplink Frequency" value="1550 nm" />
             <Stat label="Simulation Rate" value={`${SIM_RATE_HZ}.0 Hz`} />
