@@ -1,24 +1,16 @@
 import React from "react";
 import { cn } from "@/lib/cn";
 
-/**
- * Apple-style panel — white/pale gray surface with soft shadow,
- * rounded corners, clean borders.
- */
+/** Instrument panel — sharp corners, 1px structural border, tonal surface (design.md). */
 export function Panel({
   className,
   children,
   as: As = "div",
-  dark,
   ...rest
-}: React.HTMLAttributes<HTMLElement> & { as?: React.ElementType; dark?: boolean }) {
+}: React.HTMLAttributes<HTMLElement> & { as?: React.ElementType }) {
   return (
     <As
-      className={cn(
-        "rounded-lg overflow-hidden transition-all duration-apple",
-        dark ? "bg-sensor-black border border-gray-600" : "bg-white shadow-sm border border-gray-200",
-        className,
-      )}
+      className={cn("bg-surface-container border border-outline-variant", className)}
       {...rest}
     >
       {children}
@@ -39,21 +31,20 @@ export function PanelHeader({
 }) {
   const color =
     accent === "warning"
-      ? "text-status-warning"
+      ? "text-tertiary-container"
       : accent === "lost"
-        ? "text-status-error"
+        ? "text-error"
         : accent === "primary"
-          ? "text-apple-blue"
-          : "text-gray-500";
-
+          ? "text-primary"
+          : "text-on-surface-variant";
   return (
     <div
       className={cn(
-        "flex items-center justify-between border-b border-gray-200 px-4 py-3 bg-gray-100/50",
+        "flex items-center justify-between border-b border-outline-variant bg-surface-container-low px-margin-md py-margin-sm",
         className,
       )}
     >
-      <span className={cn("text-xs font-semibold tracking-wide uppercase", color)}>
+      <span className={cn("font-label-xs text-label-xs uppercase tracking-widest", color)}>
         {title}
       </span>
       {right}
@@ -61,7 +52,7 @@ export function PanelHeader({
   );
 }
 
-/** Status indicator — 8px circle, pulsing when active */
+/** small 8x8 status square — solid = active, 1px stroke = inactive (design.md) */
 export function StatusSquare({
   active,
   color = "primary",
@@ -73,19 +64,18 @@ export function StatusSquare({
   pulse?: boolean;
   className?: string;
 }) {
-  const colors = {
-    primary: active ? "bg-apple-blue" : "bg-gray-300",
-    warning: active ? "bg-status-warning" : "bg-gray-300",
-    lost: active ? "bg-status-error" : "bg-gray-300",
-    detected: active ? "bg-apple-blue-active" : "bg-gray-300",
-    muted: active ? "bg-gray-500" : "bg-gray-300",
+  const bg = {
+    primary: "bg-primary border-primary",
+    warning: "bg-tertiary border-tertiary",
+    lost: "bg-error border-error",
+    detected: "bg-secondary border-secondary",
+    muted: "bg-on-surface-variant border-on-surface-variant",
   }[color];
-
   return (
     <span
       className={cn(
-        "inline-block w-2 h-2 rounded-full transition-all",
-        colors,
+        "inline-block h-2 w-2 border",
+        active ? bg : `bg-transparent ${bg.split(" ")[1]}`,
         pulse && active && "animate-pulse",
         className,
       )}
@@ -93,7 +83,7 @@ export function StatusSquare({
   );
 }
 
-/** Data readout — label above, mono value below */
+/** label-above / mono-value-below readout — the core telemetry primitive */
 export function Readout({
   label,
   value,
@@ -110,28 +100,27 @@ export function Readout({
   className?: string;
 }) {
   const valueColor = {
-    default: "text-apple-ink",
-    primary: "text-apple-blue",
-    warning: "text-status-warning",
-    lost: "text-status-error",
-    detected: "text-apple-blue-active",
-    muted: "text-gray-500",
+    default: "text-on-surface",
+    primary: "text-primary",
+    warning: "text-tertiary-fixed",
+    lost: "text-error",
+    detected: "text-secondary-fixed-dim",
+    muted: "text-on-surface-variant",
   }[tone];
-
   return (
-    <div className={cn("flex flex-col gap-1", align === "right" && "items-end", className)}>
-      <span className="text-xs font-normal text-gray-500">
+    <div className={cn("flex flex-col gap-unit", align === "right" && "items-end", className)}>
+      <span className="font-label-xs text-label-xs uppercase tracking-widest text-on-surface-variant">
         {label}
       </span>
-      <span className={cn("font-mono text-base font-medium tnum", valueColor)}>
+      <span className={cn("font-data-mono text-data-mono tnum", valueColor)}>
         {value}
-        {unit != null && <span className="ml-1 text-gray-400">{unit}</span>}
+        {unit != null && <span className="ml-1 text-on-surface-variant">{unit}</span>}
       </span>
     </div>
   );
 }
 
-/** Key/value row with optional border */
+/** key/value row with a hairline underline — used in side telemetry stacks */
 export function KeyValueRow({
   k,
   v,
@@ -144,22 +133,23 @@ export function KeyValueRow({
   border?: boolean;
 }) {
   const valueColor = {
-    default: "text-apple-ink",
-    primary: "text-apple-blue",
-    warning: "text-status-warning",
-    lost: "text-status-error",
-    muted: "text-gray-500",
+    default: "text-on-surface",
+    primary: "text-primary-fixed",
+    warning: "text-tertiary-fixed",
+    lost: "text-error",
+    muted: "text-on-surface-variant",
   }[tone];
-
   return (
     <div
       className={cn(
-        "flex items-baseline justify-between py-2 px-4",
-        border && "border-b border-gray-200",
+        "flex items-baseline justify-between pb-unit",
+        border && "border-b border-outline-variant",
       )}
     >
-      <span className="text-sm font-normal text-gray-600">{k}</span>
-      <span className={cn("font-mono text-sm font-medium tnum", valueColor)}>{v}</span>
+      <span className="font-label-xs text-label-xs uppercase tracking-wide text-on-surface-variant">
+        {k}
+      </span>
+      <span className={cn("font-data-mono text-data-mono tnum", valueColor)}>{v}</span>
     </div>
   );
 }

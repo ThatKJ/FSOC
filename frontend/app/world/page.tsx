@@ -34,14 +34,14 @@ export default function WorldPage() {
   const lost = current.trackingState === "TARGET_LOST";
 
   return (
-    <Screen className="bg-gray-100">
+    <Screen className="bg-surface-container-lowest">
       <div className="relative flex w-full flex-1">
         <div className="absolute inset-0 z-0">
           <WorldCanvas view={view} />
         </div>
 
         {/* view switch */}
-        <div className="absolute left-6 top-6 z-10 flex flex-col overflow-hidden rounded-lg bg-white/90 shadow-md backdrop-blur-md">
+        <div className="absolute left-margin-md top-margin-md z-10 flex flex-col gap-gutter bg-surface-container/80 p-unit shadow-md backdrop-blur-md">
           {VIEWS.map((vw) => {
             const Icon = vw.icon;
             const active = vw.id === view;
@@ -50,8 +50,8 @@ export default function WorldPage() {
                 key={vw.id}
                 onClick={() => setView(vw.id)}
                 className={cn(
-                  "group flex w-full items-center justify-between px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide transition-all",
-                  active ? "bg-apple-blue text-white" : "bg-white text-gray-700 hover:bg-gray-100",
+                  "group flex w-full items-center justify-between px-margin-md py-margin-sm text-left font-headline-sm text-headline-sm transition-colors",
+                  active ? "bg-surface-container-highest text-primary" : "bg-surface-container-low text-on-surface-variant hover:bg-surface-bright",
                 )}
               >
                 {vw.label}
@@ -62,41 +62,41 @@ export default function WorldPage() {
         </div>
 
         {/* axes legend */}
-        <div className="absolute bottom-6 left-6 z-10 flex gap-3 rounded-lg bg-white/90 px-4 py-2 shadow-md backdrop-blur-md">
+        <div className="absolute bottom-margin-md left-margin-md z-10 flex gap-margin-sm">
           {[
-            ["X", "bg-status-error text-status-error"],
-            ["Y", "bg-apple-blue text-apple-blue"],
-            ["Z", "bg-gray-500 text-gray-700"],
+            ["X", "bg-error text-error"],
+            ["Y", "bg-primary text-primary"],
+            ["Z", "bg-secondary text-secondary"],
           ].map(([k, c]) => (
-            <div key={k} className="flex flex-col items-center gap-1">
+            <div key={k} className="flex flex-col items-center gap-unit">
               <div className={cn("h-8 w-px", c.split(" ")[0])} />
-              <span className={cn("font-mono text-xs font-medium", c.split(" ")[1])}>{k}</span>
+              <span className={cn("font-data-mono text-label-xs", c.split(" ")[1])}>{k}</span>
             </div>
           ))}
         </div>
 
         {/* telemetry panel */}
-        <aside className="absolute bottom-6 right-6 top-6 z-20 flex w-[320px] flex-col overflow-hidden rounded-lg bg-white/95 shadow-xl backdrop-blur-md">
-          <div className="flex items-center justify-between border-b border-gray-200 bg-gray-100/50 px-4 py-3">
-            <span className="text-xs font-semibold uppercase tracking-wider text-apple-ink">
+        <aside className="absolute bottom-margin-md right-margin-md top-margin-md z-20 flex w-[320px] flex-col overflow-hidden bg-surface-container/90 shadow-xl backdrop-blur-md">
+          <div className="flex items-center justify-between bg-surface-container-highest p-panel-padding">
+            <span className="font-headline-sm text-headline-sm uppercase tracking-widest text-on-surface">
               Target Telemetry
             </span>
-            <span className={cn("h-2 w-2 rounded-full", lost ? "bg-status-error" : "animate-pulse bg-apple-blue")} />
+            <span className={cn("h-2 w-2 rounded-full", lost ? "bg-error" : "animate-pulse bg-primary")} />
           </div>
 
-          <div className="flex flex-1 flex-col gap-4 overflow-y-auto p-4">
+          <div className="flex flex-1 flex-col gap-margin-md overflow-y-auto p-panel-padding">
             <Group label="Position (m)">
-              <div className="grid grid-cols-3 gap-1 rounded-lg overflow-hidden">
+              <div className="grid grid-cols-3 gap-gutter bg-outline-variant">
                 <Axis label="X-AXIS" value={fixed(p.x, 2)} color="error" />
                 <Axis label="Y-AXIS" value={fixed(p.y, 2)} color="primary" />
                 <Axis label="Z-AXIS" value={fixed(p.z, 2)} color="secondary" />
               </div>
             </Group>
 
-            <div className="h-px w-full bg-gray-200" />
+            <div className="h-px w-full bg-gradient-to-r from-outline-variant to-transparent" />
 
             <Group label="Velocity (m/s)">
-              <div className="grid grid-cols-2 gap-1 rounded-lg overflow-hidden">
+              <div className="grid grid-cols-2 gap-gutter bg-outline-variant">
                 <Bar label="LINEAR" value={fixed(linSpeed, 2)} pctFill={Math.min(100, linSpeed * 3)} color="primary" />
                 <Bar
                   label="|Y RATE|"
@@ -107,10 +107,10 @@ export default function WorldPage() {
               </div>
             </Group>
 
-            <div className="h-px w-full bg-gray-200" />
+            <div className="h-px w-full bg-gradient-to-r from-outline-variant to-transparent" />
 
             <Group label="Camera Attitude">
-              <div className="flex flex-col rounded-lg bg-gray-50 p-3">
+              <div className="flex flex-col bg-surface-container-low p-margin-sm">
                 <KeyValueRow k="PAN" v={`${signed(current.camera.panDeg, 2)}°`} tone="primary" />
                 <KeyValueRow k="TILT" v={`${signed(current.camera.tiltDeg, 2)}°`} tone="primary" />
                 <KeyValueRow
@@ -121,21 +121,21 @@ export default function WorldPage() {
               </div>
             </Group>
 
-            <div className="relative mt-auto flex flex-col gap-2 overflow-hidden rounded-lg bg-red-50 p-3">
-              <div className="absolute left-0 top-0 h-[2px] w-full bg-status-error" />
-              <span className="text-xs font-semibold uppercase tracking-wider text-status-error">LOS Error</span>
-              <div className="flex items-baseline gap-1">
-                <span className="font-mono text-2xl font-semibold tabular-nums text-status-error">
+            <div className="relative mt-auto flex flex-col gap-margin-sm overflow-hidden bg-error/10 p-margin-sm shadow-inner">
+              <div className="absolute left-0 top-0 h-[2px] w-full bg-error" />
+              <span className="font-label-xs text-label-xs uppercase tracking-widest text-error">LOS Error</span>
+              <div className="flex items-baseline gap-unit">
+                <span className="font-display-telem text-display-telem tnum text-error">
                   {current.tracking.totalErrorDeg != null ? fixed(current.tracking.totalErrorDeg, 3) : "—"}
                 </span>
-                <span className="font-mono text-sm text-status-error/80">DEG</span>
+                <span className="font-data-mono text-data-mono text-error/80">DEG</span>
               </div>
             </div>
           </div>
         </aside>
 
         {/* transport */}
-        <div className="absolute bottom-6 left-1/2 z-20 -translate-x-1/2 rounded-lg bg-white shadow-lg">
+        <div className="absolute bottom-margin-md left-1/2 z-20 -translate-x-1/2">
           <MiniTransport />
         </div>
       </div>
@@ -145,8 +145,8 @@ export default function WorldPage() {
 
 function Group({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div className="flex flex-col gap-2">
-      <span className="w-fit rounded bg-gray-100 px-2 py-0.5 text-xs font-semibold uppercase tracking-wider text-gray-600">
+    <div className="flex flex-col gap-margin-sm">
+      <span className="w-fit bg-surface px-unit py-[2px] font-label-xs text-label-xs uppercase tracking-widest text-on-surface-variant">
         {label}
       </span>
       {children}
@@ -155,12 +155,12 @@ function Group({ label, children }: { label: string; children: React.ReactNode }
 }
 
 function Axis({ label, value, color }: { label: string; value: string; color: "error" | "primary" | "secondary" }) {
-  const bar = { error: "bg-status-error/50", primary: "bg-apple-blue/50", secondary: "bg-gray-500/50" }[color];
+  const bar = { error: "bg-error/50", primary: "bg-primary/50", secondary: "bg-secondary/50" }[color];
   return (
-    <div className="relative flex flex-col gap-1 overflow-hidden bg-gray-50 p-3">
+    <div className="relative flex flex-col gap-unit overflow-hidden bg-surface-container-low p-margin-sm">
       <div className={cn("absolute inset-y-0 left-0 w-[2px]", bar)} />
-      <span className="text-xs text-gray-600">{label}</span>
-      <span className="font-mono text-sm font-medium tabular-nums text-apple-ink">{value}</span>
+      <span className="font-label-xs text-label-xs text-on-surface-variant">{label}</span>
+      <span className="font-data-mono text-data-mono tnum text-on-surface">{value}</span>
     </div>
   );
 }
@@ -176,14 +176,14 @@ function Bar({
   pctFill: number;
   color: "primary" | "secondary";
 }) {
-  const c = color === "primary" ? "bg-apple-blue" : "bg-gray-500";
-  const t = color === "primary" ? "text-apple-blue" : "text-gray-700";
+  const c = color === "primary" ? "bg-primary" : "bg-secondary";
+  const t = color === "primary" ? "text-primary" : "text-secondary";
   return (
-    <div className="flex flex-col gap-1 bg-gray-50 p-3">
-      <span className="text-xs text-gray-600">{label}</span>
-      <span className={cn("font-mono text-sm font-medium tabular-nums", t)}>{value}</span>
-      <div className="relative mt-1 h-[2px] w-full bg-gray-200">
-        <div className={cn("absolute inset-y-0 left-0 transition-all duration-300", c)} style={{ width: `${pctFill}%` }} />
+    <div className="flex flex-col gap-unit bg-surface-container-low p-margin-sm">
+      <span className="font-label-xs text-label-xs text-on-surface-variant">{label}</span>
+      <span className={cn("font-data-mono text-data-mono tnum", t)}>{value}</span>
+      <div className="relative mt-unit h-[2px] w-full bg-surface">
+        <div className={cn("absolute inset-y-0 left-0", c)} style={{ width: `${pctFill}%` }} />
       </div>
     </div>
   );

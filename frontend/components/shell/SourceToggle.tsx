@@ -5,14 +5,16 @@ import { useSimulation } from "@/lib/simulation/SimulationProvider";
 import { cn } from "@/lib/cn";
 
 /**
- * SpaceX-style source toggle — minimal, ghost borders.
+ * LOCAL ENGINE MODE  vs  REPLAY MODE toggle.
+ * `auto` = prefer the local C++ `fsoc_demo` binary, fall back to the checked-in
+ * deterministic replay fixture. The visual components are identical either way.
  */
 export function SourceToggle() {
   const { source, setSource, meta } = useSimulation();
-  const active = meta?.source;
+  const active = meta?.source; // what actually served the current telemetry
 
   return (
-    <div className="hidden items-center border border-ghost-border md:flex">
+    <div className="hidden items-center gap-gutter border border-outline-variant bg-surface md:flex">
       {(["engine", "replay"] as const).map((s) => {
         const Icon = s === "engine" ? Cpu : Database;
         const selected = source === s || (source === "auto" && active === s);
@@ -27,14 +29,12 @@ export function SourceToggle() {
                 : "REPLAY — checked-in deterministic C++ telemetry"
             }
             className={cn(
-              "flex items-center gap-2 px-3 py-1.5 text-[10px] tracking-[0.12em] transition-all duration-300",
-              selected
-                ? "bg-ghost text-spectral"
-                : "text-spectral-muted hover:bg-ghost hover:text-spectral",
+              "flex items-center gap-unit px-margin-sm py-unit font-label-xs text-label-xs uppercase transition-colors",
+              selected ? "bg-surface-variant text-primary" : "text-on-surface-variant hover:text-on-surface",
             )}
           >
             <Icon className="h-3 w-3" strokeWidth={1.5} />
-            {s.toUpperCase()}
+            {s}
           </button>
         );
       })}

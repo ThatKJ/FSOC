@@ -9,68 +9,55 @@ import { cn } from "@/lib/cn";
 import { ScenarioMenu } from "./ScenarioMenu";
 import { SourceToggle } from "./SourceToggle";
 
-/**
- * Apple-style header — clean, minimal, light with subtle borders.
- */
+/** Fixed header, h-48. Reproduces the Stitch shell header, wired to the sim clock. */
 export function TopBar() {
   const { simTime, runState, meta, status } = useSimulation();
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
 
-  const active = status !== "error";
+  const uplinkOk = status !== "error";
 
   return (
-    <header className="fixed left-0 right-0 top-0 z-50 flex h-12 items-center justify-between border-b border-gray-300 bg-white/80 px-4 backdrop-blur-xl">
-      {/* Left: Brand */}
-      <div className="flex items-center gap-4">
-        <div className="flex items-center gap-2">
-          <span className={cn("status-dot", runState === "RUNNING" && "active", active ? "primary" : "error")} />
-          <span className="text-base font-semibold text-apple-ink">FSOC</span>
-        </div>
-
-        <span className="h-4 w-px bg-gray-300" />
-
-        <span className="text-sm text-gray-500">Alignment System</span>
-
-        <span className="h-4 w-px bg-gray-300" />
-
-        <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700">
+    <header className="fixed left-0 right-0 top-0 z-50 flex h-[48px] items-center justify-between border-b border-outline-variant bg-surface-container-lowest px-margin-md">
+      <div className="flex items-baseline gap-margin-md">
+        <span className="font-display-telem text-headline-sm tracking-widest text-on-surface">
+          FSOC ALIGNMENT
+        </span>
+        <span className="border-l border-outline-variant pl-margin-md font-label-xs text-label-xs uppercase tracking-tight text-on-surface-variant">
+          SIH26169
+        </span>
+        <span
+          className="border-l border-outline-variant pl-margin-md font-label-xs text-label-xs uppercase tracking-tight text-tertiary"
+          title="Every value on this screen comes from the deterministic C++ simulation (SyntheticCameraRenderer) — no physical camera, beacon, or pan/tilt hardware is connected."
+        >
           Simulation
         </span>
       </div>
 
-      {/* Center: Scenario */}
-      <div className="absolute left-1/2 -translate-x-1/2">
+      <div className="flex flex-1 justify-center">
         <ScenarioMenu />
       </div>
 
-      {/* Right: Status */}
-      <div className="flex items-center gap-4">
+      <div className="flex items-center gap-margin-md">
         <SourceToggle />
-
-        <span className="h-4 w-px bg-gray-300" />
-
-        {/* Clock */}
-        <div className="flex items-center gap-1.5">
-          <span className="text-xs text-gray-500">T+</span>
-          <span className="font-mono text-sm font-medium text-apple-ink">
-            {mounted ? simClock(simTime) : "00.000"}s
+        <div className="flex items-center gap-unit font-data-mono text-data-mono text-on-surface-variant">
+          <span className="text-primary">SIM</span>
+          <span className="tnum">{mounted ? simClock(simTime) : "00.000"}s</span>
+        </div>
+        <div className="flex items-center gap-unit border-l border-outline-variant px-margin-sm">
+          <span
+            className={cn(
+              "h-2 w-2",
+              uplinkOk ? "bg-primary" : "bg-error",
+              runState === "RUNNING" && "animate-pulse",
+            )}
+          />
+          <span className="font-label-xs text-label-xs uppercase text-on-surface">
+            {uplinkOk ? "Sim Feed Active" : "Sim Feed Fault"}
           </span>
         </div>
-
-        <span className="h-4 w-px bg-gray-300" />
-
-        {/* Status */}
-        <div className="flex items-center gap-2">
-          <span className={cn("status-dot", active ? "primary active" : "error")} />
-          <span className="text-sm text-gray-600">
-            {active ? "Active" : "Fault"}
-          </span>
-        </div>
-
-        {/* Avatar */}
-        <div className="flex h-8 w-8 items-center justify-center rounded-full bg-apple-blue text-white shadow-sm">
-          <User className="h-4 w-4" strokeWidth={2} />
+        <div className="ml-margin-sm flex h-8 w-8 items-center justify-center rounded-full bg-primary">
+          <User className="h-[18px] w-[18px] text-on-primary" strokeWidth={1.75} />
         </div>
       </div>
     </header>
