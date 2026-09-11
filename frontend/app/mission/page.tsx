@@ -20,14 +20,14 @@ export default function MissionControlPage() {
   const lost = current.trackingState === "TARGET_LOST";
 
   return (
-    <Screen className="bg-surface-container-lowest">
+    <Screen className="bg-white">
       <div className="relative flex flex-1 overflow-hidden">
         {/* optical feed */}
-        <div className="relative flex-1 overflow-hidden border-r border-outline-variant bg-sensor-black">
+        <div className="relative flex-1 overflow-hidden border-r border-gray-200">
           <TrackingFeedLive compact />
 
-          {/* Stitch mini FPA overlay */}
-          <div className="absolute left-margin-md top-[52px] z-20 font-data-mono text-data-mono leading-5 text-primary/70">
+          {/* Mini FPA overlay */}
+          <div className="absolute left-4 top-4 z-20 rounded-lg bg-white/90 px-3 py-2 font-mono text-sm leading-5 text-apple-blue shadow-sm backdrop-blur-md">
             SENSOR_FPA_ACTIVE
             <br />
             FOV: {fixed(current.camera.horizontalFovDeg, 1)}deg
@@ -35,20 +35,20 @@ export default function MissionControlPage() {
             EXP: 50ms
           </div>
 
-          {/* Stitch bottom status strip */}
-          <div className="absolute bottom-0 left-0 right-0 z-30 flex items-end justify-between border-t border-outline-variant bg-surface-container/90 p-panel-padding backdrop-blur-sm">
-            <div className="flex gap-margin-md font-data-mono text-data-mono">
-              <div className="flex flex-col gap-unit">
-                <span className="font-label-xs text-label-xs uppercase text-on-surface-variant">State</span>
-                <span className={cn(lost ? "text-error" : "text-primary-fixed-dim")}>
+          {/* Bottom status strip */}
+          <div className="absolute bottom-0 left-0 right-0 z-30 flex items-end justify-between border-t border-gray-200 bg-white/95 px-4 py-3 backdrop-blur-md">
+            <div className="flex gap-6 font-mono text-sm">
+              <div className="flex flex-col gap-1">
+                <span className="text-xs uppercase text-gray-600">State</span>
+                <span className={cn("font-semibold", lost ? "text-status-error" : "text-apple-blue")}>
                   {lost ? "TARGET LOST" : "LOCKED"}
                 </span>
               </div>
-              <div className="flex flex-col gap-unit">
-                <span className="font-label-xs text-label-xs uppercase text-on-surface-variant">Error</span>
-                <div className="flex gap-margin-sm">
-                  <span className="tnum text-on-surface">{deg(current.tracking.totalErrorDeg, 3)}</span>
-                  <span className="tnum text-on-surface-variant">
+              <div className="flex flex-col gap-1">
+                <span className="text-xs uppercase text-gray-600">Error</span>
+                <div className="flex gap-2">
+                  <span className="font-medium tabular-nums text-apple-ink">{deg(current.tracking.totalErrorDeg, 3)}</span>
+                  <span className="tabular-nums text-gray-500">
                     ({current.tracking.errorXPx != null && current.tracking.errorYPx != null
                       ? px(Math.hypot(current.tracking.errorXPx, current.tracking.errorYPx))
                       : "—"}{" "}
@@ -56,14 +56,14 @@ export default function MissionControlPage() {
                   </span>
                 </div>
               </div>
-              <div className="flex flex-col gap-unit">
-                <span className="font-label-xs text-label-xs uppercase text-on-surface-variant">Attitude</span>
-                <div className="flex gap-margin-sm text-on-surface-variant">
+              <div className="flex flex-col gap-1">
+                <span className="text-xs uppercase text-gray-600">Attitude</span>
+                <div className="flex gap-3 text-gray-600">
                   <span>
-                    PAN <span className="tnum text-on-surface">{fixed(current.camera.panDeg, 2)}</span>
+                    PAN <span className="font-medium tabular-nums text-apple-ink">{fixed(current.camera.panDeg, 2)}</span>
                   </span>
                   <span>
-                    TILT <span className="tnum text-on-surface">{fixed(current.camera.tiltDeg, 2)}</span>
+                    TILT <span className="font-medium tabular-nums text-apple-ink">{fixed(current.camera.tiltDeg, 2)}</span>
                   </span>
                 </div>
               </div>
@@ -76,12 +76,12 @@ export default function MissionControlPage() {
       </div>
 
       {/* bottom band: pointing error + event log */}
-      <div className="flex h-[120px] shrink-0 border-t border-outline-variant bg-surface-container-low">
-        <div className="relative flex flex-1 flex-col overflow-hidden border-r border-outline-variant">
-          <PointingErrorChartLive className="flex-1 pt-margin-md" height={84} compact />
+      <div className="flex h-[120px] shrink-0 border-t border-gray-200 bg-white">
+        <div className="relative flex flex-1 flex-col overflow-hidden border-r border-gray-200">
+          <PointingErrorChartLive className="flex-1 pt-4" height={84} compact />
         </div>
-        <div className="flex w-[320px] shrink-0 flex-col overflow-hidden bg-surface-container p-margin-md">
-          <span className="mb-margin-sm font-label-xs text-label-xs uppercase text-on-surface-variant">
+        <div className="flex w-[320px] shrink-0 flex-col overflow-hidden bg-gray-50 p-4">
+          <span className="mb-2 text-xs font-semibold uppercase text-gray-600">
             Event Log
           </span>
           <EventLog className="flex-1" max={12} />

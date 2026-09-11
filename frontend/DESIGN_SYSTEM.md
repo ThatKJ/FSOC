@@ -115,6 +115,50 @@ Calibration ticks: small `1×4px` / `2×8px` rectangles at viewport corners.
 
 ---
 
+## Elevation & motion — "Mk II" pass
+
+An additive refinement layer. It does **not** change the palette, type scale, or
+spacing, and it does not reintroduce the things design.md forbids (no decorative
+gradients, no blurred drop-shadows *on the plane*, still dark-only, still sharp
+corners).
+
+### Elevation — tone + 1px inset light
+
+Depth is still carried by surface tone. A raised panel additionally gets a
+single 1px inset top highlight so it reads as lifted without a blur.
+
+| token / class | value | use |
+|---|---|---|
+| `--edge-light` | `rgba(233,246,244,0.05)` | 1px inset top highlight |
+| `--edge-shade` | `rgba(0,0,0,0.28)` | 1px inset bottom shade (recessed wells) |
+| `shadow-edge` (Tailwind) / `.edge-lit` | `inset 0 1px 0 var(--edge-light)` | raised panels, header, nav rail, buttons |
+| `.edge-well` | inset shade + 1px border | sunken readouts / optical viewports |
+| `.vignette` | radial corner-darkening (tone only) | optical viewports |
+| `shadow-pop` (Tailwind) | `0 12px 32px -12px rgba(0,0,0,.6)` + inset light | **overlays only** (menus / popovers that float off the plane) |
+
+`shadow-pop` is the single sanctioned blurred shadow and is reserved for true
+overlays — never for a panel sitting in the layout.
+
+### Motion tokens
+
+| token | value | use |
+|---|---|---|
+| `--dur-1` / `--dur-2` / `--dur-3` | `120 / 200 / 340 ms` | state change · fade · entrance |
+| `--ease-out` | `cubic-bezier(0.16, 1, 0.3, 1)` (`ease-out-expo`) | default |
+| `--ease-in-out` | `cubic-bezier(0.76, 0, 0.24, 1)` (`in-out-quart`) | reversible transitions |
+| `--focus-ring` | `var(--tracking)` | 2px `:focus-visible` outline, offset 1px (global) |
+| `--flash-bg` | `rgba(111,238,225,0.16)` (`--tracking` @ 16 %) | telemetry value-change wash |
+
+Animations: `animate-rise` (entrance, 6px up + fade), `animate-fade`,
+`animate-flash` (value tick). All decorative loops + entrances collapse to ~0 ms
+under `prefers-reduced-motion: reduce` (global rule in `globals.css`).
+
+Motion is functional only — mount/unmount, acquisition, and value change.
+Framer-motion variants live in `components/ui/motion.ts`; `AnimatedValue`
+(`components/ui/Panel.tsx` readouts) applies the flash wash.
+
+---
+
 ## Instrument styles
 
 - **Status square** — 8×8px (`h-2 w-2`); solid fill = active, 1px stroke =

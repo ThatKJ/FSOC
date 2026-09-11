@@ -2,18 +2,22 @@ import React from "react";
 import { TopBar } from "./TopBar";
 import { NavRail } from "./NavRail";
 
-/** Header (48px) + left rail (64px) + main. Matches the Stitch shell exactly. */
+/**
+ * Apple-style shell — clean, light, premium.
+ */
 export function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <>
       <TopBar />
       <NavRail />
-      <main className="relative min-h-screen bg-background pl-[64px] pt-[48px]">{children}</main>
+      <main className="relative min-h-screen animate-fadeIn bg-apple-white pl-16 pt-12">
+        {children}
+      </main>
     </>
   );
 }
 
-/** Standard page frame: fills the viewport below the header. */
+/** Full-viewport screen frame */
 export function Screen({
   children,
   className = "",
@@ -25,11 +29,17 @@ export function Screen({
 }) {
   return (
     <div
-      className={`flex h-[calc(100vh-48px)] w-full flex-col overflow-hidden ${
-        pad ? "p-margin-md gap-margin-md" : ""
-      } ${className}`}
+      className={cn(
+        "flex h-[calc(100vh-48px)] w-full flex-col overflow-hidden",
+        pad && "gap-4 p-4",
+        className
+      )}
     >
       {children}
     </div>
   );
+}
+
+function cn(...classes: (string | boolean | undefined)[]) {
+  return classes.filter(Boolean).join(" ");
 }
