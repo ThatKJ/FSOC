@@ -232,71 +232,74 @@ std::string to_json(const fsoc::LiveFrameResult& r, fsoc::PerceptionMode mode, b
                      const std::string& session_id, bool calibrated, const RecordingStatus& recording) {
     std::ostringstream j;
     j << std::fixed << std::setprecision(6);
-    j << "{\n"
-      << "  \"schemaVersion\": 1,\n"
-      << "  \"sessionId\": \"" << json_escape(session_id) << "\",\n"
-      << "  \"recordingActive\": " << (recording.active ? "true" : "false") << ",\n"
-      << "  \"recordingId\": " << (recording.active ? ("\"" + json_escape(recording.recording_id) + "\"") : "null")
-      << ",\n"
-      << "  \"recordedFrameCount\": " << recording.recorded_frame_count << ",\n"
-      << "  \"recordingErrorCount\": " << recording.error_count << ",\n"
-      << "  \"frameIndex\": " << r.frame_index << ",\n"
-      << "  \"timestampS\": " << r.timestamp_s << ",\n"
-      << "  \"dtS\": " << r.dt_s << ",\n"
-      << "  \"cameraSource\": \"REAL_PHONE_CAMERA\",\n"
-      << "  \"actuatorType\": \"VIRTUAL\",\n"
-      << "  \"sourceKind\": \"" << fsoc::to_string(r.source.kind) << "\",\n"
-      << "  \"sourceBackend\": \"" << json_escape(r.source.backend_name) << "\",\n"
-      << "  \"sourceDescription\": \"" << json_escape(r.source.description) << "\",\n"
-      << "  \"rawWidthPx\": " << r.raw_width_px << ",\n"
-      << "  \"rawHeightPx\": " << r.raw_height_px << ",\n"
-      << "  \"preprocessedWidthPx\": " << r.preprocessed_width_px << ",\n"
-      << "  \"preprocessedHeightPx\": " << r.preprocessed_height_px << ",\n"
-      << "  \"perceptionMode\": \"" << fsoc::to_string(mode) << "\",\n"
-      << "  \"perceptionSource\": \"" << fsoc::to_string(r.perception.perception_source) << "\",\n"
-      << "  \"classicalDetected\": " << (r.perception.classical_detected ? "true" : "false") << ",\n"
-      << "  \"aiCandidateDetected\": " << (r.perception.ai_candidate_detected ? "true" : "false") << ",\n"
-      << "  \"aiPresenceProbability\": " << opt_json(r.perception.ai_presence_probability) << ",\n"
-      << "  \"targetDetected\": " << (r.target_detected ? "true" : "false") << ",\n"
-      << "  \"detectedXPx\": "
-      << (r.detection.has_value() ? std::to_string(r.detection->centroid_px.x_px) : "null") << ",\n"
-      << "  \"detectedYPx\": "
-      << (r.detection.has_value() ? std::to_string(r.detection->centroid_px.y_px) : "null") << ",\n"
-      << "  \"pixelErrorXPx\": " << (r.tracking_error.has_value() ? std::to_string(r.tracking_error->pixel.x_px) : "null") << ",\n"
-      << "  \"pixelErrorYPx\": " << (r.tracking_error.has_value() ? std::to_string(r.tracking_error->pixel.y_px) : "null") << ",\n"
+    // Deliberately single-line/compact: this string is also appended verbatim as one
+    // line into RealSessionRecorder's telemetry.jsonl (one JSON object per line), so it
+    // must never contain an embedded literal newline -- see docs/LIVE_REALDATA_TASK_STATE.md.
+    j << "{"
+      << "\"schemaVersion\": 1,"
+      << "\"sessionId\": \"" << json_escape(session_id) << "\","
+      << "\"recordingActive\": " << (recording.active ? "true" : "false") << ","
+      << "\"recordingId\": " << (recording.active ? ("\"" + json_escape(recording.recording_id) + "\"") : "null")
+      << ","
+      << "\"recordedFrameCount\": " << recording.recorded_frame_count << ","
+      << "\"recordingErrorCount\": " << recording.error_count << ","
+      << "\"frameIndex\": " << r.frame_index << ","
+      << "\"timestampS\": " << r.timestamp_s << ","
+      << "\"dtS\": " << r.dt_s << ","
+      << "\"cameraSource\": \"REAL_PHONE_CAMERA\","
+      << "\"actuatorType\": \"VIRTUAL\","
+      << "\"sourceKind\": \"" << fsoc::to_string(r.source.kind) << "\","
+      << "\"sourceBackend\": \"" << json_escape(r.source.backend_name) << "\","
+      << "\"sourceDescription\": \"" << json_escape(r.source.description) << "\","
+      << "\"rawWidthPx\": " << r.raw_width_px << ","
+      << "\"rawHeightPx\": " << r.raw_height_px << ","
+      << "\"preprocessedWidthPx\": " << r.preprocessed_width_px << ","
+      << "\"preprocessedHeightPx\": " << r.preprocessed_height_px << ","
+      << "\"perceptionMode\": \"" << fsoc::to_string(mode) << "\","
+      << "\"perceptionSource\": \"" << fsoc::to_string(r.perception.perception_source) << "\","
+      << "\"classicalDetected\": " << (r.perception.classical_detected ? "true" : "false") << ","
+      << "\"aiCandidateDetected\": " << (r.perception.ai_candidate_detected ? "true" : "false") << ","
+      << "\"aiPresenceProbability\": " << opt_json(r.perception.ai_presence_probability) << ","
+      << "\"targetDetected\": " << (r.target_detected ? "true" : "false") << ","
+      << "\"detectedXPx\": "
+      << (r.detection.has_value() ? std::to_string(r.detection->centroid_px.x_px) : "null") << ","
+      << "\"detectedYPx\": "
+      << (r.detection.has_value() ? std::to_string(r.detection->centroid_px.y_px) : "null") << ","
+      << "\"pixelErrorXPx\": " << (r.tracking_error.has_value() ? std::to_string(r.tracking_error->pixel.x_px) : "null") << ","
+      << "\"pixelErrorYPx\": " << (r.tracking_error.has_value() ? std::to_string(r.tracking_error->pixel.y_px) : "null") << ","
       // Angular fields require a real FOV. In --uncalibrated mode the sensing camera is
       // built from a placeholder FOV purely so the (unused) control math has *some*
       // angle to compute with -- reporting that placeholder-derived degree value would
       // look exactly like a real measurement, so it is always null here regardless of
       // whether compute_tracking_error() produced a value.
-      << "  \"panErrorDeg\": "
+      << "\"panErrorDeg\": "
       << ((calibrated && r.tracking_error.has_value())
               ? std::to_string(fsoc::rad_to_deg(r.tracking_error->angular.pan_rad))
               : "null")
-      << ",\n"
-      << "  \"tiltErrorDeg\": "
+      << ","
+      << "\"tiltErrorDeg\": "
       << ((calibrated && r.tracking_error.has_value())
               ? std::to_string(fsoc::rad_to_deg(r.tracking_error->angular.tilt_rad))
               : "null")
-      << ",\n"
-      << "  \"totalErrorDeg\": "
+      << ","
+      << "\"totalErrorDeg\": "
       << ((calibrated && r.tracking_error.has_value())
               ? std::to_string(fsoc::rad_to_deg(
                     std::hypot(r.tracking_error->angular.pan_rad, r.tracking_error->angular.tilt_rad)))
               : "null")
-      << ",\n"
-      << "  \"calibrationStatus\": \"" << (calibrated ? "CALIBRATED" : "UNCALIBRATED") << "\",\n"
-      << "  \"lockState\": \"" << fsoc::to_string(r.tracked_state.lock_state) << "\",\n"
-      << "  \"trackerConfidence\": " << r.tracked_state.confidence << ",\n"
-      << "  \"isPrediction\": " << (r.tracked_state.is_prediction ? "true" : "false") << ",\n"
-      << "  \"controlEnabled\": " << (control_enabled ? "true" : "false") << ",\n"
-      << "  \"commandPanRateDegS\": " << fsoc::rad_to_deg(r.command.pan_rate_rad_s) << ",\n"
-      << "  \"commandTiltRateDegS\": " << fsoc::rad_to_deg(r.command.tilt_rate_rad_s) << ",\n"
-      << "  \"virtualPanDeg\": " << fsoc::rad_to_deg(r.actuator_state.pan_rad) << ",\n"
-      << "  \"virtualTiltDeg\": " << fsoc::rad_to_deg(r.actuator_state.tilt_rad) << ",\n"
-      << "  \"virtualPanSaturated\": " << (r.actuator_state.pan_saturated ? "true" : "false") << ",\n"
-      << "  \"virtualTiltSaturated\": " << (r.actuator_state.tilt_saturated ? "true" : "false") << "\n"
-      << "}\n";
+      << ","
+      << "\"calibrationStatus\": \"" << (calibrated ? "CALIBRATED" : "UNCALIBRATED") << "\","
+      << "\"lockState\": \"" << fsoc::to_string(r.tracked_state.lock_state) << "\","
+      << "\"trackerConfidence\": " << r.tracked_state.confidence << ","
+      << "\"isPrediction\": " << (r.tracked_state.is_prediction ? "true" : "false") << ","
+      << "\"controlEnabled\": " << (control_enabled ? "true" : "false") << ","
+      << "\"commandPanRateDegS\": " << fsoc::rad_to_deg(r.command.pan_rate_rad_s) << ","
+      << "\"commandTiltRateDegS\": " << fsoc::rad_to_deg(r.command.tilt_rate_rad_s) << ","
+      << "\"virtualPanDeg\": " << fsoc::rad_to_deg(r.actuator_state.pan_rad) << ","
+      << "\"virtualTiltDeg\": " << fsoc::rad_to_deg(r.actuator_state.tilt_rad) << ","
+      << "\"virtualPanSaturated\": " << (r.actuator_state.pan_saturated ? "true" : "false") << ","
+      << "\"virtualTiltSaturated\": " << (r.actuator_state.tilt_saturated ? "true" : "false")
+      << "}";
     return j.str();
 }
 
