@@ -113,7 +113,7 @@ test("saving Present without clicking the image is rejected, not silently accept
   await mockOneRecording(page);
   await page.goto("/mission/annotate");
   await page.getByText(RECORDING_ID).click();
-  await expect(page.getByText("Frame 0 / 2")).toBeVisible();
+  await expect(page.getByText("Frame 1 / 3")).toBeVisible();
 
   await page.getByRole("radio").first().check(); // "Present" is the first option
   await page.getByRole("button", { name: "Save Label" }).click();
@@ -124,7 +124,7 @@ test("clicking the image then saving Present persists a reviewed label", async (
   await mockOneRecording(page);
   await page.goto("/mission/annotate");
   await page.getByText(RECORDING_ID).click();
-  await expect(page.getByText("Frame 0 / 2")).toBeVisible();
+  await expect(page.getByText("Frame 1 / 3")).toBeVisible();
 
   const img = page.locator('img[alt="Recorded frame 0"]');
   await img.click({ position: { x: 50, y: 50 } });
@@ -139,7 +139,7 @@ test("navigating to a new frame does not carry over the previous frame's unsaved
   await mockOneRecording(page);
   await page.goto("/mission/annotate");
   await page.getByText(RECORDING_ID).click();
-  await expect(page.getByText("Frame 0 / 2")).toBeVisible();
+  await expect(page.getByText("Frame 1 / 3")).toBeVisible();
 
   const img = page.locator('img[alt="Recorded frame 0"]');
   await img.click({ position: { x: 50, y: 50 } });
@@ -148,7 +148,7 @@ test("navigating to a new frame does not carry over the previous frame's unsaved
   await expect(page.getByText("already reviewed: present")).toBeVisible();
 
   await page.getByRole("button", { name: "Next →" }).click();
-  await expect(page.getByText("Frame 1 / 2")).toBeVisible();
+  await expect(page.getByText("Frame 2 / 3")).toBeVisible();
   // Frame 1 was never labeled -- must not inherit frame 0's "already reviewed" text
   // or its checked radio button.
   await expect(page.getByText(/already reviewed/)).not.toBeVisible();
