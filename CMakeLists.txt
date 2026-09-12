@@ -15,6 +15,28 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+# Software-identity provenance for real-session recordings (G2): the commit that was
+# actually BUILT, captured at configure time (not re-queried at runtime, which would
+# reflect whatever HEAD happens to be when fsoc_live runs, possibly after further
+# edits). "unknown" outside a git checkout (e.g. an extracted source tarball) rather
+# than failing configure.
+find_package(Git QUIET)
+set(FSOC_GIT_COMMIT "unknown")
+if(GIT_FOUND)
+    execute_process(
+        COMMAND ${GIT_EXECUTABLE} rev-parse HEAD
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+        OUTPUT_VARIABLE FSOC_GIT_COMMIT_RESULT
+        RESULT_VARIABLE FSOC_GIT_COMMIT_STATUS
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET
+    )
+    if(FSOC_GIT_COMMIT_STATUS EQUAL 0 AND FSOC_GIT_COMMIT_RESULT)
+        set(FSOC_GIT_COMMIT "${FSOC_GIT_COMMIT_RESULT}")
+    endif()
+endif()
+message(STATUS "FSOC: git commit for recording provenance = ${FSOC_GIT_COMMIT}")
+
 include(cmake/CompilerWarnings.cmake)
 include(cmake/Sanitizers.cmake)
 
@@ -57,14 +79,54 @@ fsoc_set_project_warnings(fsoc_control)
 fsoc_enable_sanitizers(fsoc_control)
 
 # ---------------------------------------------------------------------------
+# fsoc_camera_calibration — Mobile Phone Camera-in-the-Loop milestone.
+# The simplest defensible camera geometry (Phase 8): a declared/measured
+# pinhole FOV, stored in a dependency-free key=value file. Deliberately
+# OpenCV-FREE and buildable unconditionally (even with FSOC_ENABLE_OPENCV=OFF)
+# — it is pure math + file I/O, no camera or image dependency at all.
+# ---------------------------------------------------------------------------
+add_library(fsoc_camera_calibration src/live_camera_calibration.cpp)
+add_library(fsoc::camera_calibration ALIAS fsoc_camera_calibration)
+target_include_directories(fsoc_camera_calibration
+    PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        $<INSTALL_INTERFACE:include>
+)
+target_compile_features(fsoc_camera_calibration PUBLIC cxx_std_20)
+fsoc_set_project_warnings(fsoc_camera_calibration)
+fsoc_enable_sanitizers(fsoc_camera_calibration)
+
+# ---------------------------------------------------------------------------
+# fsoc_virtual_actuator — Mobile Phone Camera-in-the-Loop milestone.
+# Honest bookkeeping actuator (Phase 11). Also OpenCV-FREE and buildable
+# unconditionally — pure rate-limit/integrate/clamp math, no camera/image
+# dependency, no coupling to PanTiltCamera (see fsoc/virtual_actuator.hpp).
+# ---------------------------------------------------------------------------
+add_library(fsoc_virtual_actuator src/virtual_actuator.cpp)
+add_library(fsoc::virtual_actuator ALIAS fsoc_virtual_actuator)
+target_include_directories(fsoc_virtual_actuator
+    PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        $<INSTALL_INTERFACE:include>
+)
+target_compile_features(fsoc_virtual_actuator PUBLIC cxx_std_20)
+fsoc_set_project_warnings(fsoc_virtual_actuator)
+fsoc_enable_sanitizers(fsoc_virtual_actuator)
+
+add_executable(fsoc_camera_calibrate apps/fsoc_camera_calibrate.cpp)
+target_link_libraries(fsoc_camera_calibrate PRIVATE fsoc::camera_calibration)
+fsoc_set_project_warnings(fsoc_camera_calibrate)
+fsoc_enable_sanitizers(fsoc_camera_calibrate)
+
+# ---------------------------------------------------------------------------
 # OpenCV discovery (image/perception boundary only — never linked into fsoc_core)
 # ---------------------------------------------------------------------------
 set(FSOC_OPENCV_AVAILABLE OFF)
 if(NOT FSOC_ENABLE_OPENCV STREQUAL "OFF")
     if(FSOC_ENABLE_OPENCV STREQUAL "ON")
-        find_package(OpenCV REQUIRED COMPONENTS core imgproc imgcodecs dnn)
+        find_package(OpenCV REQUIRED COMPONENTS core imgproc imgcodecs dnn videoio)
     else()
-        find_package(OpenCV QUIET COMPONENTS core imgproc imgcodecs dnn)
+        find_package(OpenCV QUIET COMPONENTS core imgproc imgcodecs dnn videoio)
     endif()
     if(OpenCV_FOUND)
         set(FSOC_OPENCV_AVAILABLE ON)
@@ -156,6 +218,135 @@ if(FSOC_OPENCV_AVAILABLE)
     target_link_libraries(fsoc_ai_perception PUBLIC fsoc::core opencv_core opencv_imgproc opencv_dnn)
     fsoc_set_project_warnings(fsoc_ai_perception)
     fsoc_enable_sanitizers(fsoc_ai_perception)
+
+    # -----------------------------------------------------------------------
+    # fsoc_frame_source — Mobile Phone Camera-in-the-Loop milestone.
+    # Pure I/O boundary (FrameSource interface + cv::VideoCapture adapter).
+    # Depends ONLY on OpenCV core + videoio. MUST NOT depend on fsoc::core,
+    # fsoc::perception, fsoc::ai_perception, or fsoc::render: a frame source
+    # knows nothing about detection, perception mode, or world truth.
+    # -----------------------------------------------------------------------
+    if(TARGET opencv_videoio)
+        add_library(fsoc_frame_source src/frame_source.cpp src/opencv_camera_frame_source.cpp)
+        add_library(fsoc::frame_source ALIAS fsoc_frame_source)
+        target_include_directories(fsoc_frame_source
+            PUBLIC
+                $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+                $<INSTALL_INTERFACE:include>
+                ${OpenCV_INCLUDE_DIRS}
+        )
+        target_compile_features(fsoc_frame_source PUBLIC cxx_std_20)
+        target_link_libraries(fsoc_frame_source PUBLIC opencv_core opencv_videoio)
+        fsoc_set_project_warnings(fsoc_frame_source)
+        fsoc_enable_sanitizers(fsoc_frame_source)
+        set(FSOC_FRAME_SOURCE_AVAILABLE ON)
+        message(STATUS "FSOC: OpenCV videoio present - phone-camera-in-the-loop targets enabled")
+    else()
+        set(FSOC_FRAME_SOURCE_AVAILABLE OFF)
+        message(STATUS "FSOC: OpenCV videoio absent - phone-camera-in-the-loop targets disabled")
+    endif()
+
+    if(FSOC_FRAME_SOURCE_AVAILABLE)
+        # -------------------------------------------------------------------
+        # fsoc_atomic_file_io — write-to-temp-then-rename helper shared by
+        # LiveFramePublisher and RealSessionRecorder. No OpenCV/fsoc::core
+        # dependency at all; pure filesystem utility.
+        # -------------------------------------------------------------------
+        add_library(fsoc_atomic_file_io src/atomic_file_io.cpp)
+        add_library(fsoc::atomic_file_io ALIAS fsoc_atomic_file_io)
+        target_include_directories(fsoc_atomic_file_io
+            PUBLIC
+                $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+                $<INSTALL_INTERFACE:include>
+        )
+        target_compile_features(fsoc_atomic_file_io PUBLIC cxx_std_20)
+        fsoc_set_project_warnings(fsoc_atomic_file_io)
+        fsoc_enable_sanitizers(fsoc_atomic_file_io)
+
+        # -------------------------------------------------------------------
+        # fsoc_live_frame_publisher — atomic, frame-identity-safe local file
+        # transport for fsoc_live's long-running (no finite CSV) output. Pure
+        # I/O sink: depends only on OpenCV core/imgcodecs, never on
+        # fsoc::core/perception/control. See docs/LIVE_DATA_AUDIT.md section 2
+        # for the gap this closes.
+        # -------------------------------------------------------------------
+        add_library(fsoc_live_frame_publisher src/live_frame_publisher.cpp)
+        add_library(fsoc::live_frame_publisher ALIAS fsoc_live_frame_publisher)
+        target_include_directories(fsoc_live_frame_publisher
+            PUBLIC
+                $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+                $<INSTALL_INTERFACE:include>
+                ${OpenCV_INCLUDE_DIRS}
+        )
+        target_compile_features(fsoc_live_frame_publisher PUBLIC cxx_std_20)
+        target_link_libraries(fsoc_live_frame_publisher PUBLIC opencv_core opencv_imgcodecs fsoc::atomic_file_io)
+        fsoc_set_project_warnings(fsoc_live_frame_publisher)
+        fsoc_enable_sanitizers(fsoc_live_frame_publisher)
+
+        # -------------------------------------------------------------------
+        # fsoc_real_session_recorder — G2 real-data recording sink (raw
+        # frames + per-frame telemetry + event markers + manifest), never
+        # pruned unlike the live preview buffer above. Pure I/O sink: no
+        # fsoc::core/perception/control dependency.
+        # -------------------------------------------------------------------
+        add_library(fsoc_real_session_recorder src/real_session_recorder.cpp)
+        add_library(fsoc::real_session_recorder ALIAS fsoc_real_session_recorder)
+        target_include_directories(fsoc_real_session_recorder
+            PUBLIC
+                $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+                $<INSTALL_INTERFACE:include>
+                ${OpenCV_INCLUDE_DIRS}
+        )
+        target_compile_features(fsoc_real_session_recorder PUBLIC cxx_std_20)
+        target_link_libraries(fsoc_real_session_recorder PUBLIC opencv_core opencv_imgcodecs fsoc::atomic_file_io)
+        fsoc_set_project_warnings(fsoc_real_session_recorder)
+        fsoc_enable_sanitizers(fsoc_real_session_recorder)
+
+        # -------------------------------------------------------------------
+        # fsoc_live_support — real-camera perception/tracking/virtual-actuator
+        # orchestration (LiveTrackingSession), the real-camera counterpart to
+        # fsoc_simulation (which similarly backs fsoc_demo via
+        # fsoc_demo_support). Depends on fsoc::core (camera geometry, target
+        # tracker), fsoc::control (PID), fsoc::perception (classical
+        # detector), fsoc::ai_perception (AI detector + Safe Hybrid), and
+        # fsoc::frame_source (Frame/FrameSourceInfo types only — never
+        # constructs a FrameSource itself; that stays the CLI app's job).
+        # -------------------------------------------------------------------
+        add_library(fsoc_live_support
+            src/live_preprocessing.cpp
+            src/live_tracking_session.cpp
+        )
+        add_library(fsoc::live_support ALIAS fsoc_live_support)
+        target_include_directories(fsoc_live_support
+            PUBLIC
+                $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+                $<INSTALL_INTERFACE:include>
+                ${OpenCV_INCLUDE_DIRS}
+        )
+        target_compile_features(fsoc_live_support PUBLIC cxx_std_20)
+        target_link_libraries(fsoc_live_support
+            PUBLIC fsoc::core fsoc::control fsoc::perception fsoc::ai_perception fsoc::frame_source
+            fsoc::camera_calibration fsoc::virtual_actuator opencv_imgproc)
+        fsoc_set_project_warnings(fsoc_live_support)
+        fsoc_enable_sanitizers(fsoc_live_support)
+
+        add_executable(fsoc_camera_probe apps/fsoc_camera_probe.cpp)
+        target_link_libraries(fsoc_camera_probe PRIVATE fsoc::frame_source)
+        fsoc_set_project_warnings(fsoc_camera_probe)
+        fsoc_enable_sanitizers(fsoc_camera_probe)
+
+        add_executable(fsoc_camera_view apps/fsoc_camera_view.cpp)
+        target_link_libraries(fsoc_camera_view PRIVATE fsoc::frame_source opencv_imgcodecs opencv_imgproc)
+        fsoc_set_project_warnings(fsoc_camera_view)
+        fsoc_enable_sanitizers(fsoc_camera_view)
+
+        add_executable(fsoc_live apps/fsoc_live.cpp)
+        target_link_libraries(fsoc_live PRIVATE fsoc::live_support fsoc::camera_calibration
+            fsoc::live_frame_publisher fsoc::real_session_recorder opencv_imgcodecs opencv_imgproc)
+        target_compile_definitions(fsoc_live PRIVATE FSOC_GIT_COMMIT="${FSOC_GIT_COMMIT}")
+        fsoc_set_project_warnings(fsoc_live)
+        fsoc_enable_sanitizers(fsoc_live)
+    endif()
 
     # -----------------------------------------------------------------------
     # fsoc_simulation — the deterministic closed-loop integration layer (Step 7).
@@ -401,6 +592,19 @@ if(FSOC_BUILD_TESTS)
     fsoc_enable_sanitizers(fsoc_target_tracker_tests)
     add_test(NAME fsoc_target_tracker_tests COMMAND fsoc_target_tracker_tests)
 
+    # --- Mobile Phone Camera-in-the-Loop: OpenCV-free pieces, unconditional ---
+    add_executable(fsoc_virtual_actuator_tests tests/virtual_actuator_tests.cpp)
+    target_link_libraries(fsoc_virtual_actuator_tests PRIVATE fsoc::virtual_actuator)
+    fsoc_set_project_warnings(fsoc_virtual_actuator_tests)
+    fsoc_enable_sanitizers(fsoc_virtual_actuator_tests)
+    add_test(NAME fsoc_virtual_actuator_tests COMMAND fsoc_virtual_actuator_tests)
+
+    add_executable(fsoc_live_camera_calibration_tests tests/live_camera_calibration_tests.cpp)
+    target_link_libraries(fsoc_live_camera_calibration_tests PRIVATE fsoc::camera_calibration)
+    fsoc_set_project_warnings(fsoc_live_camera_calibration_tests)
+    fsoc_enable_sanitizers(fsoc_live_camera_calibration_tests)
+    add_test(NAME fsoc_live_camera_calibration_tests COMMAND fsoc_live_camera_calibration_tests)
+
     if(FSOC_OPENCV_AVAILABLE)
         add_executable(fsoc_step4_tests tests/step4_tests.cpp)
         target_link_libraries(fsoc_step4_tests PRIVATE fsoc::render)
@@ -492,5 +696,38 @@ if(FSOC_BUILD_TESTS)
         fsoc_set_project_warnings(fsoc_stage4_determinism_tests)
         fsoc_enable_sanitizers(fsoc_stage4_determinism_tests)
         add_test(NAME fsoc_stage4_determinism_tests COMMAND fsoc_stage4_determinism_tests)
+
+        # --- Mobile Phone Camera-in-the-Loop: OpenCV/videoio-dependent pieces ---
+        if(FSOC_FRAME_SOURCE_AVAILABLE)
+            add_executable(fsoc_frame_source_tests tests/frame_source_tests.cpp)
+            target_link_libraries(fsoc_frame_source_tests PRIVATE fsoc::frame_source)
+            fsoc_set_project_warnings(fsoc_frame_source_tests)
+            fsoc_enable_sanitizers(fsoc_frame_source_tests)
+            add_test(NAME fsoc_frame_source_tests COMMAND fsoc_frame_source_tests)
+
+            add_executable(fsoc_live_preprocessing_tests tests/live_preprocessing_tests.cpp)
+            target_link_libraries(fsoc_live_preprocessing_tests PRIVATE fsoc::live_support)
+            fsoc_set_project_warnings(fsoc_live_preprocessing_tests)
+            fsoc_enable_sanitizers(fsoc_live_preprocessing_tests)
+            add_test(NAME fsoc_live_preprocessing_tests COMMAND fsoc_live_preprocessing_tests)
+
+            add_executable(fsoc_live_tracking_session_tests tests/live_tracking_session_tests.cpp)
+            target_link_libraries(fsoc_live_tracking_session_tests PRIVATE fsoc::live_support)
+            fsoc_set_project_warnings(fsoc_live_tracking_session_tests)
+            fsoc_enable_sanitizers(fsoc_live_tracking_session_tests)
+            add_test(NAME fsoc_live_tracking_session_tests COMMAND fsoc_live_tracking_session_tests)
+
+            add_executable(fsoc_live_frame_publisher_tests tests/live_frame_publisher_tests.cpp)
+            target_link_libraries(fsoc_live_frame_publisher_tests PRIVATE fsoc::live_frame_publisher)
+            fsoc_set_project_warnings(fsoc_live_frame_publisher_tests)
+            fsoc_enable_sanitizers(fsoc_live_frame_publisher_tests)
+            add_test(NAME fsoc_live_frame_publisher_tests COMMAND fsoc_live_frame_publisher_tests)
+
+            add_executable(fsoc_real_session_recorder_tests tests/real_session_recorder_tests.cpp)
+            target_link_libraries(fsoc_real_session_recorder_tests PRIVATE fsoc::real_session_recorder)
+            fsoc_set_project_warnings(fsoc_real_session_recorder_tests)
+            fsoc_enable_sanitizers(fsoc_real_session_recorder_tests)
+            add_test(NAME fsoc_real_session_recorder_tests COMMAND fsoc_real_session_recorder_tests)
+        endif()
     endif()
 endif()

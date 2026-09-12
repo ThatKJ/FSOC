@@ -13,6 +13,7 @@
   <img src="https://img.shields.io/badge/OpenCV-DNN-5C3EE8?style=flat-square" alt="OpenCV DNN inference">
   <img src="https://img.shields.io/badge/Model-ONNX-00A6A6?style=flat-square" alt="ONNX model">
   <img src="https://img.shields.io/badge/UI-Next.js-111827?style=flat-square" alt="Next.js Mission Control">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square" alt="MIT License"></a>
 </p>
 
 <p align="center">
@@ -41,7 +42,7 @@ FSOC closes the loop between **what a camera sees and how an optical terminal po
 
 The core runs in **C++20**. **TinyBeaconNet** performs neural inference through **OpenCV DNN**, while **Mission Control** makes the resulting trajectories, errors, controller commands, and tracking states inspectable.
 
-**Current scope:** the default branch provides a deterministic software-in-the-loop system. The [phone-camera branch](https://github.com/ThatKJ/FSOC/tree/feat/phone-camera-in-loop) extends it toward real image input with a virtual actuator; its physical validation remains separate from the simulation results below.
+**Current scope:** the deterministic software-in-the-loop simulation below is the frozen SIH baseline. This branch also carries the **phone/webcam camera-in-the-loop prototype** (`fsoc_live`, see [Mobile Phone Camera-in-the-Loop](#mobile-phone-camera-in-the-loop-optional-additive-prototype)): a real camera frame through the same perception/tracking/control stack, with an honestly virtual actuator. Its physical validation is tracked separately from the simulation results below.
 
 ## Why this exists
 
@@ -239,6 +240,18 @@ The optional [`TargetTracker`](include/fsoc/target_tracker.hpp) adds an alpha-be
 
 These are **recorded simulation results**, linked to their committed methods and evidence. They are not physical-camera accuracy measurements or a fresh benchmark of the reader's machine.
 
+| | |
+|---|---|
+| Step-10 baseline acceptance | **7 / 7 PASS** |
+| C++ test suites (`ctest`) | **22 / 22** (100%) |
+| Frontend end-to-end tests (Playwright) | **20 / 20** |
+| Severe (>50px) closed-loop outliers — Classical | 2,240 |
+| Severe closed-loop outliers — Classical + Tracker | 12 (**↓ ~99.5%**) |
+| Severe closed-loop outliers — Hybrid | 1,808 |
+| Severe closed-loop outliers — Hybrid + Tracker (V2) | 9 (**↓ ~99.5%**) |
+| Full-step latency, Hybrid + Tracker, P95 | **~1.2 ms**, vs. the 20 ms / 50 Hz budget |
+| Telemetry pipeline | 42-column real CSV export, header-driven |
+
 ### Classical closed-loop baseline
 
 The Step-10 comparison runs the same sinusoidal trajectory with and without control:
@@ -276,6 +289,73 @@ The Stage-4 ablation evaluates **11 scenarios × 5 seeds × 400 steps = 22,000 s
 
 Timing was measured on the documented **Apple M5 development machine**, not embedded or flight hardware. Earlier runs report P95 values of 1.439–1.639 ms under their recorded conditions; timing depends on workload and platform. [Freeze run](docs/SIH_MVP_FREEZE.md) · [Timing methodology](docs/MVP_METRICS.md)
 
+## Mobile Phone Camera-in-the-Loop (optional, additive prototype)
+
+Alongside the fully-simulated demo above, `fsoc_live` (`apps/fsoc_live.cpp`) makes the
+**sensing side** real: a real phone/webcam frame, run through the exact same Classical +
+TinyBeaconNet + Safe Hybrid perception, P0-v2 state estimator, and PID controller the
+simulation uses — see `docs/PHONE_CAMERA_METRICS.md`. The **actuator side stays honestly
+virtual**: `VirtualPanTiltActuator` bookkeeps a commanded angle and drives no physical
+hardware. Every telemetry frame and the Mission Control view at `/mission/live` label this
+explicitly (`CAMERA SOURCE: REAL_PHONE_CAMERA`, `ACTUATOR: VIRTUAL`). This is a
+"real-camera-in-the-loop prototype," never a "physical pan/tilt tracking system" — see
+`docs/PHONE_CAMERA_METRICS.md`'s claim boundary. Run it yourself with `./run_fsoc.sh phone`
+(or `./run_fsoc.sh golden` for the full narrated walkthrough,
+`docs/PHONE_CAMERA_GOLDEN_DEMO.md`) — requires a real camera and, on macOS, granting an OS
+permission prompt.
+
+## Hardware boundary
+
+No physical beacon, servo, or pan/tilt actuator has been used anywhere in this project, and
+the frozen SIH MVP simulation above uses zero physical hardware of any kind. The one
+exception is the optional prototype directly above: it reads frames from a real camera, but
+still commands no physical actuator. Every measured number in the "Measured results" section
+above comes from the deterministic C++ simulation on a desktop-class development machine
+(Apple M5), not from the camera prototype. **No claim of embedded, flight, physical
+actuation, or real-time-on-target hardware performance is made or implied anywhere in this
+repository.** See `docs/MVP_METRICS.md §5`, `docs/SIH_MVP_FREEZE.md §6`, and
+`docs/PHONE_CAMERA_METRICS.md`.
+
+## Working modes
+
+FSOC runs in more than one context, and each has a different, explicit camera/actuator
+boundary — never blurred, never silently upgraded to sound more impressive:
+
+| Mode | Camera | Actuator | Purpose |
+|---|---|---|---|
+| **Simulation** (`fsoc_demo`) | Synthetic (rendered) | Simulated | Deterministic development, evaluation, and the frozen SIH baseline. |
+| **Mission Control — REPLAY** | Synthetic (recorded) | Simulated | Public/offline viewing of a checked-in run — no C++ build required. |
+| **Mission Control — ENGINE** | Synthetic (live) | Simulated | Local viewing of `fsoc_demo` running live, streamed over `/api/simulation/:scenario`. |
+| **Phone camera-in-the-loop** (`fsoc_live`) | Real (phone/webcam) | Virtual (bookkept, drives nothing) | Proves the perception → estimation → control stack against a real image, locally. |
+| **Physical hardware** | Real | Real (physical pan/tilt) | **Not implemented.** Would replace `FrameSource` / `PanTiltCamera` behind the same interfaces (`docs/09_FUTURE_ARCHITECTURE.md`) — no such hardware exists in this repository today. |
+
+The public web deployment (see **Deployment** below) only ever serves the first two rows —
+it has no access to your camera or a local C++ process, and it never pretends otherwise.
+
+## Deployment
+
+The public site is a static/serverless Next.js deployment of `frontend/` — it shows the
+project, its architecture, and deterministic replay evidence produced by the real C++
+engine. It is **not** a backend for the phone-camera prototype: your camera and `fsoc_live`
+run on your own machine, and Vercel has no way to reach either. `/mission/live` detects the
+missing local session and shows a "run this locally" state instead of fabricating one —
+see the API route at `frontend/app/api/live-camera/route.ts`.
+
+Full architecture, project settings, and the local-vs-public split: **`docs/DEPLOYMENT.md`**.
+
+### One-command launcher
+
+```bash
+./run_fsoc.sh
+```
+
+One command, one interactive menu — Simulation Demo, Phone Camera Demo, Camera Probe,
+Mission Control Only, Run Full Validation, Golden Phone Demo, or Build Everything. It
+builds only what's missing, never guesses a port (reads it from
+`frontend/package.json`), never touches a process it didn't start, and cleans up on
+Ctrl+C. Non-interactive: `./run_fsoc.sh simulation|phone|probe|ui|test|golden|build`.
+See `scripts/run_fsoc.sh --help` for every flag (`--rebuild`, `--no-browser`).
+
 ## Validation
 
 Run the baseline checks from the repository root:
@@ -283,8 +363,14 @@ Run the baseline checks from the repository root:
 ```bash
 cmake --preset debug -DFSOC_ENABLE_OPENCV=ON
 cmake --build --preset debug
-ctest --preset debug --output-on-failure
-./build/debug/step10_validation_smoke
+ctest --preset debug --output-on-failure                                   # 22/22 C++ suites
+./build/debug/step10_validation_smoke                                      # 7/7 baseline gates
+cmake --preset release && cmake --build --preset release
+./build/release/stage4_evaluation --out generated/ai_stage4                 # ~10-15 min, frozen protocol
+./build/release/stage4_tracker_ablation --out generated/ai_stage4_ablation  # ~15 min, clutter mitigation
+./build/release/mvp_dynamic_scenarios --out generated/mvp_dynamic_scenarios # velocity/dropout/moving-clutter
+./build/release/mvp_latency_budget                                          # full latency budget, seconds
+cd frontend && npm run typecheck && npm run lint && npm run build && npx playwright test
 ```
 
 For the frontend, run the following inside `frontend/` after `npm ci`. The checked-in Playwright configuration uses **installed Google Chrome**, rather than a Playwright-managed Chromium download.
@@ -294,6 +380,45 @@ npm run typecheck
 npm run lint
 npm run build
 npx playwright test
+```
+
+## Known limitations
+
+State these proactively — they're disclosed in `docs/SIH_MVP_FREEZE.md`, not buried:
+
+1. **A temporally coherent moving distractor defeats the clutter mitigation
+   completely** — identical outlier counts with or without the tracker
+   (`docs/MVP_ABLATION.md §6`). The single most important limitation.
+2. **The intrinsic single-frame classical false-positive rate (44.9%) is unchanged** —
+   unfixable without touching the frozen classical detector algorithm.
+3. **AI-only reacquisition through `resolve_perception()` is not implemented** — the
+   prerequisite gate exists (ADR-019); unlocking it is a distinct, deliberately
+   deferred change to the frozen fusion policy.
+4. AI recall is intentionally low (~16-40% depending on scenario) rather than
+   over-confident — a deliberate precision-over-recall design choice, not a bug.
+5. Real coverage cost: Hybrid+Tracker trades ~20 points of coverage for the outlier
+   reduction above — a disclosed trade, not a free win.
+6. Evaluated at n=5 seeds per scenario (matches the frozen protocol) — real, not
+   large-sample, statistics.
+
+## Repository structure
+
+```text
+include/fsoc/       Public interfaces
+src/                Core implementations
+apps/               Executable simulation/demo/benchmark/evaluation programs
+tests/              Mathematical/unit validation (CTest)
+models/             Committed trained ONNX model + metadata (models/MODEL_CARD.md)
+tools/ai/           Offline Python training toolchain (NOT part of the C++ runtime)
+tools/beacon_display.html  Real, physical test-target page for the phone-camera prototype
+frontend/           Next.js Mission Control UI (reads real fsoc_demo telemetry)
+cmake/              Build policies
+.github/workflows/  CI (build + test, C++ and frontend)
+.claude/skills/     Claude Code engineering skills
+.claude/agents/     Specialist subagents
+docs/               Design docs, measured metrics, ADRs, development history
+prompts/            Reusable Vibe Coding prompts
+generated/          Git-ignored run artifacts (CSV/PNG/JSON reports) — never committed
 ```
 
 The [CI workflow](.github/workflows/ci.yml) separately builds/tests C++ and checks the frontend. Its browser job uses replay fixtures; local tests that require an engine need the native build available. The badge at the top links to current runs; [freeze-time test results](docs/SIH_MVP_FREEZE.md) are historical evidence.
@@ -332,7 +457,7 @@ The evaluation deliberately includes failure cases:
 | Deterministic C++ coarse-alignment loop | Implemented; baseline acceptance documented |
 | Neural inference and Hybrid policy | Implemented; model, parity checks, and evaluation committed |
 | Temporal tracking and bounded recovery | Implemented; ablation and failure cases documented |
-| Phone/webcam frame input with virtual actuation | Separate [development branch](https://github.com/ThatKJ/FSOC/tree/feat/phone-camera-in-loop); physical measurements pending in its [test documentation](https://github.com/ThatKJ/FSOC/blob/683f70835c2fd70be5c3bbea03cc3d0fa88db679/docs/PHONE_CAMERA_METRICS.md) |
+| Phone/webcam frame input with virtual actuation | Implemented (`fsoc_live`); see [Mobile Phone Camera-in-the-Loop](#mobile-phone-camera-in-the-loop-optional-additive-prototype) and [test documentation](docs/PHONE_CAMERA_METRICS.md) |
 | Continuous streaming, stronger live-session UX, and evidence export | Further integration work |
 | Packaged desktop application and physical pan/tilt bench | Planned |
 | Coarse-to-fine handoff and optical-link validation | Future research |
@@ -385,9 +510,13 @@ The evaluation deliberately includes failure cases:
 
 ## Contributing
 
-Open an [issue](https://github.com/ThatKJ/FSOC/issues) with the scenario, configuration, commit, and evidence needed to reproduce a problem. Keep changes focused and include relevant tests.
+Open an [issue](https://github.com/ThatKJ/FSOC/issues) with the scenario, configuration, commit, and evidence needed to reproduce a problem. Keep changes focused and include relevant tests. See [CONTRIBUTING.md](CONTRIBUTING.md) and [SECURITY.md](SECURITY.md) for the full process and reporting a vulnerability.
 
-Read [AGENTS.md](AGENTS.md) and [CLAUDE.md](CLAUDE.md) before implementation. Preserve the frozen baseline, keep truth out of the controller, retain explicit units, and document any algorithm change with its measured effect. The repository does not currently include a `LICENSE` file.
+Read [AGENTS.md](AGENTS.md) and [CLAUDE.md](CLAUDE.md) before implementation (human or AI). They define the module boundaries (`Environment` / `Trajectory` / `PanTiltCamera` / `Detector` / `Controller` / ...), coordinate conventions, and the C++20/CMake-only build rules that keep the simulation mathematically traceable. Preserve the frozen baseline, keep truth out of the controller, retain explicit units, and document any algorithm change with its measured effect (`docs/16_AI_CODING_GUARDRAILS.md`).
+
+## License
+
+[MIT](LICENSE).
 
 <p align="center">
   <strong>Built by Team IRODOV</strong><br>
