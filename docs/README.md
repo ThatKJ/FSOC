@@ -11,6 +11,10 @@ for what it covers.
 | [`SIH_MVP_FREEZE.md`](SIH_MVP_FREEZE.md) | The frozen SIH MVP state: build/test status, measured metrics, safe vs. unsafe claims for a judge presentation, exact demo commands |
 | [`MVP_GOLDEN_DEMO.md`](MVP_GOLDEN_DEMO.md) | The 15-step, fully reproducible judge-session walkthrough |
 | [`RELEASE_NOTES_v2_sih_mvp.md`](RELEASE_NOTES_v2_sih_mvp.md) | Draft GitHub release notes for the `v2_sih_mvp` tag (not yet published) |
+| [`PHONE_CAMERA_METRICS.md`](PHONE_CAMERA_METRICS.md) | Mobile Phone Camera-in-the-Loop: architecture, JSON telemetry schema, claim boundary, real-camera metrics |
+| [`PHONE_CAMERA_GOLDEN_DEMO.md`](PHONE_CAMERA_GOLDEN_DEMO.md) | The 15-step real-camera demo walkthrough (run yourself — needs a real camera) |
+| [`PHONE_CAMERA_TEST_PLAN.md`](PHONE_CAMERA_TEST_PLAN.md) | Automated (CTest) vs. manual (hardware-required) test split, with a PASS/FAIL checklist |
+| [`DEPLOYMENT.md`](DEPLOYMENT.md) | Public Vercel deployment architecture, project settings, and why the phone-camera prototype stays local-only |
 
 ## Architecture
 

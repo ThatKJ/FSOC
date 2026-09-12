@@ -23,9 +23,9 @@ export default function OverviewPage() {
 
   return (
     <Screen>
-      <div className="flex w-full flex-1 overflow-hidden">
+      <div className="flex w-full flex-1 flex-col overflow-visible lg:flex-row lg:overflow-hidden">
         {/* hero */}
-        <div className="relative z-10 flex w-1/3 flex-col justify-center border-r border-outline-variant bg-surface px-12">
+        <div className="relative z-10 flex w-full flex-col justify-center border-b border-outline-variant bg-surface px-6 py-10 lg:w-1/3 lg:border-b-0 lg:border-r lg:px-12 lg:py-0">
           <div className="mb-4">
             <span className="mb-1 block font-label-xs text-label-xs uppercase tracking-widest text-primary">
               SIH26169
@@ -70,7 +70,7 @@ export default function OverviewPage() {
             </button>
           </div>
 
-          <div className="absolute bottom-12 left-12 grid grid-cols-2 gap-x-8 gap-y-4">
+          <div className="mt-auto grid grid-cols-2 gap-x-8 gap-y-4 pt-12">
             <Stat label="System Status" value={status === "error" ? "LINK FAULT" : "NOMINAL"} tone={status === "error" ? "lost" : "primary"} pulse />
             <Stat label="Uplink Frequency" value="1550 nm" />
             <Stat label="Simulation Rate" value={`${SIM_RATE_HZ}.0 Hz`} />
@@ -79,11 +79,11 @@ export default function OverviewPage() {
         </div>
 
         {/* optical viewport */}
-        <div className="relative flex w-2/3 flex-col bg-black">
+        <div className="relative flex h-[60vh] w-full flex-col bg-black lg:h-auto lg:w-2/3">
           <TrackingFeedLive compact label="FSOC OPTICAL TRACKER · OVERVIEW" />
 
-          {/* camera chips */}
-          <div className="absolute right-4 top-4 z-20 flex flex-col gap-2">
+          {/* camera chips -- secondary telemetry, collapsed on mobile to leave room for the label */}
+          <div className="absolute right-4 top-4 z-20 hidden flex-col gap-2 lg:flex">
             {[
               ["FPS", `${SIM_RATE_HZ}.0`, "text-primary"],
               ["EXPOSURE", "15 ms", "text-on-surface"],

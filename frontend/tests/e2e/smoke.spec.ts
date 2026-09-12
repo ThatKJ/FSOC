@@ -46,7 +46,11 @@ test.describe("routes load", () => {
   for (const r of ROUTES) {
     test(`${r.label} (${r.path}) renders without crashing`, async ({ page }) => {
       const getErrors = await noConsoleErrors(page);
-      await page.goto(r.path, { waitUntil: "networkidle" });
+      // "networkidle" is unreliable for canvas/WebGL routes (/world keeps
+      // background activity going past the 500ms-idle window on a cold
+      // remote connection) -- the assertions below are a more honest
+      // liveness check than network quiescence anyway.
+      await page.goto(r.path, { waitUntil: "load" });
       await expect(page.locator("header")).toContainText("FSOC ALIGNMENT");
       await expect(page.locator("nav a")).toHaveCount(9);
       // the shell must not be blank

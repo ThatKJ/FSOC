@@ -12,3 +12,15 @@ Upgrade in controlled layers:
 8. **Monte Carlo validation:** seeded scenario sweeps and comparative plots.
 
 Keep PID as the interpretable reference baseline throughout judging.
+
+## Real-camera sensing (implemented) and physical actuation (still future)
+
+The Mobile Phone Camera-in-the-Loop milestone made the **sensing** side of this list
+partially real ahead of schedule: `FrameSource` (`fsoc/frame_source.hpp`) is exactly the
+swappable-interface boundary this section anticipated for camera input, and
+`LiveTrackingSession` proves the existing Classical/AI/Hybrid perception, P0-v2 state
+estimator, and PID controller all already worked unchanged on real frames. **Actuator
+realism (item 7) is still entirely future** — `VirtualPanTiltActuator` is honest bookkeeping,
+not hardware. See `docs/PHONE_CAMERA_METRICS.md` for the full architecture, the hardware-
+ready `PanTiltActuator` interface sketch, and the rate-vs-position command mismatch a future
+serial/servo adapter will need to solve.

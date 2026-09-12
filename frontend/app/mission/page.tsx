@@ -21,9 +21,9 @@ export default function MissionControlPage() {
 
   return (
     <Screen className="bg-surface-container-lowest">
-      <div className="relative flex flex-1 overflow-hidden">
+      <div className="relative flex flex-1 flex-col overflow-visible lg:flex-row lg:overflow-hidden">
         {/* optical feed */}
-        <div className="relative flex-1 overflow-hidden border-r border-outline-variant bg-sensor-black">
+        <div className="relative h-[55vh] shrink-0 overflow-hidden border-r-0 border-b border-outline-variant bg-sensor-black lg:h-auto lg:flex-1 lg:border-b-0 lg:border-r">
           <TrackingFeedLive compact />
 
           {/* Stitch mini FPA overlay */}
@@ -76,11 +76,11 @@ export default function MissionControlPage() {
       </div>
 
       {/* bottom band: pointing error + event log */}
-      <div className="flex h-[120px] shrink-0 border-t border-outline-variant bg-surface-container-low">
-        <div className="relative flex flex-1 flex-col overflow-hidden border-r border-outline-variant">
+      <div className="flex flex-col border-t border-outline-variant bg-surface-container-low lg:h-[120px] lg:flex-row lg:shrink-0">
+        <div className="relative flex h-[140px] shrink-0 flex-col overflow-hidden border-b border-outline-variant lg:h-auto lg:flex-1 lg:border-b-0 lg:border-r">
           <PointingErrorChartLive className="flex-1 pt-margin-md" height={84} compact />
         </div>
-        <div className="flex w-[320px] shrink-0 flex-col overflow-hidden bg-surface-container p-margin-md">
+        <div className="flex h-[220px] w-full shrink-0 flex-col overflow-hidden bg-surface-container p-margin-md lg:h-auto lg:w-[320px]">
           <span className="mb-margin-sm font-label-xs text-label-xs uppercase text-on-surface-variant">
             Event Log
           </span>

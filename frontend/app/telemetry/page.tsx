@@ -93,29 +93,30 @@ export default function TelemetryPage() {
   return (
     <Screen>
       {/* metrics bar */}
-      <section className="flex h-[64px] shrink-0 items-stretch border-b border-outline-variant bg-surface-container-low">
+      {/* contained horizontal scroll at narrow widths -- never full-page scroll */}
+      <section className="flex h-[64px] shrink-0 items-stretch overflow-x-auto border-b border-outline-variant bg-surface-container-low">
         <MetricStat
-          className="flex-1 border-r border-outline-variant"
+          className="w-[170px] shrink-0 flex-1 border-r border-outline-variant"
           label="Detection Rate"
           value={pct(meta?.expected.detectionPct ?? runningDetectionPct, 2)}
           tone="primary"
           pulse
         />
         <MetricStat
-          className="flex-1 border-r border-outline-variant"
+          className="w-[170px] shrink-0 flex-1 border-r border-outline-variant"
           label="RMS Pointing Error"
           value={deg(meta?.expected.rmsDeg, 3)}
           status={(meta?.expected.rmsDeg ?? 0) < 1 ? "NOMINAL" : "ELEVATED"}
           tone={(meta?.expected.rmsDeg ?? 0) < 1 ? "default" : "warning"}
         />
         <MetricStat
-          className="flex-1 border-r border-outline-variant"
+          className="w-[170px] shrink-0 flex-1 border-r border-outline-variant"
           label="Lost Frames"
           value={lostSoFar}
           tone={lostSoFar > 0 ? "warning" : "default"}
         />
         <MetricStat
-          className="flex-1"
+          className="w-[170px] shrink-0 flex-1"
           label="Frame Interval"
           value={fixed(SIM_DT_S * 1000, 1)}
           unit="ms"
