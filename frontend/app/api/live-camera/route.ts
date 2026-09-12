@@ -3,6 +3,8 @@ import { readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import path from "node:path";
 
+import { liveDir } from "@/lib/live-camera/paths";
+
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
@@ -31,19 +33,6 @@ export const runtime = "nodejs";
  *   200  the current (frameIndex-identified) telemetry, plus staleness info
  *   503  no live session is running / no telemetry has been published yet
  */
-
-function repoRoot(): string {
-  return path.resolve(process.cwd(), "..");
-}
-
-function liveDir(): string {
-  const override = process.env.FSOC_LIVE_OUT;
-  return override
-    ? path.isAbsolute(override)
-      ? override
-      : path.resolve(repoRoot(), override)
-    : path.resolve(repoRoot(), "generated", "live");
-}
 
 interface Manifest {
   schemaVersion: number;

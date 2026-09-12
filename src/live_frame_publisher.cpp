@@ -2,12 +2,13 @@
 
 #include <chrono>
 #include <filesystem>
-#include <fstream>
 #include <sstream>
 #include <stdexcept>
 #include <system_error>
 
 #include <opencv2/imgcodecs.hpp>
+
+#include "fsoc/atomic_file_io.hpp"
 
 namespace fsoc {
 
@@ -33,21 +34,6 @@ void atomic_rename(const fs::path& from, const fs::path& to) {
         throw std::runtime_error("LiveFramePublisher: failed to rename " + from.string() + " -> " +
                                   to.string() + ": " + ec.message());
     }
-}
-
-void write_text_atomic(const fs::path& final_path, const std::string& content) {
-    const fs::path tmp_path = final_path.string() + ".tmp";
-    {
-        std::ofstream out(tmp_path, std::ios::trunc | std::ios::binary);
-        if (!out) {
-            throw std::runtime_error("LiveFramePublisher: failed to open " + tmp_path.string());
-        }
-        out << content;
-        if (!out) {
-            throw std::runtime_error("LiveFramePublisher: failed to write " + tmp_path.string());
-        }
-    }
-    atomic_rename(tmp_path, final_path);
 }
 
 }  // namespace

@@ -15,6 +15,28 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+# Software-identity provenance for real-session recordings (G2): the commit that was
+# actually BUILT, captured at configure time (not re-queried at runtime, which would
+# reflect whatever HEAD happens to be when fsoc_live runs, possibly after further
+# edits). "unknown" outside a git checkout (e.g. an extracted source tarball) rather
+# than failing configure.
+find_package(Git QUIET)
+set(FSOC_GIT_COMMIT "unknown")
+if(GIT_FOUND)
+    execute_process(
+        COMMAND ${GIT_EXECUTABLE} rev-parse HEAD
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+        OUTPUT_VARIABLE FSOC_GIT_COMMIT_RESULT
+        RESULT_VARIABLE FSOC_GIT_COMMIT_STATUS
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET
+    )
+    if(FSOC_GIT_COMMIT_STATUS EQUAL 0 AND FSOC_GIT_COMMIT_RESULT)
+        set(FSOC_GIT_COMMIT "${FSOC_GIT_COMMIT_RESULT}")
+    endif()
+endif()
+message(STATUS "FSOC: git commit for recording provenance = ${FSOC_GIT_COMMIT}")
+
 include(cmake/CompilerWarnings.cmake)
 include(cmake/Sanitizers.cmake)
 
@@ -226,6 +248,22 @@ if(FSOC_OPENCV_AVAILABLE)
 
     if(FSOC_FRAME_SOURCE_AVAILABLE)
         # -------------------------------------------------------------------
+        # fsoc_atomic_file_io — write-to-temp-then-rename helper shared by
+        # LiveFramePublisher and RealSessionRecorder. No OpenCV/fsoc::core
+        # dependency at all; pure filesystem utility.
+        # -------------------------------------------------------------------
+        add_library(fsoc_atomic_file_io src/atomic_file_io.cpp)
+        add_library(fsoc::atomic_file_io ALIAS fsoc_atomic_file_io)
+        target_include_directories(fsoc_atomic_file_io
+            PUBLIC
+                $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+                $<INSTALL_INTERFACE:include>
+        )
+        target_compile_features(fsoc_atomic_file_io PUBLIC cxx_std_20)
+        fsoc_set_project_warnings(fsoc_atomic_file_io)
+        fsoc_enable_sanitizers(fsoc_atomic_file_io)
+
+        # -------------------------------------------------------------------
         # fsoc_live_frame_publisher — atomic, frame-identity-safe local file
         # transport for fsoc_live's long-running (no finite CSV) output. Pure
         # I/O sink: depends only on OpenCV core/imgcodecs, never on
@@ -241,9 +279,28 @@ if(FSOC_OPENCV_AVAILABLE)
                 ${OpenCV_INCLUDE_DIRS}
         )
         target_compile_features(fsoc_live_frame_publisher PUBLIC cxx_std_20)
-        target_link_libraries(fsoc_live_frame_publisher PUBLIC opencv_core opencv_imgcodecs)
+        target_link_libraries(fsoc_live_frame_publisher PUBLIC opencv_core opencv_imgcodecs fsoc::atomic_file_io)
         fsoc_set_project_warnings(fsoc_live_frame_publisher)
         fsoc_enable_sanitizers(fsoc_live_frame_publisher)
+
+        # -------------------------------------------------------------------
+        # fsoc_real_session_recorder — G2 real-data recording sink (raw
+        # frames + per-frame telemetry + event markers + manifest), never
+        # pruned unlike the live preview buffer above. Pure I/O sink: no
+        # fsoc::core/perception/control dependency.
+        # -------------------------------------------------------------------
+        add_library(fsoc_real_session_recorder src/real_session_recorder.cpp)
+        add_library(fsoc::real_session_recorder ALIAS fsoc_real_session_recorder)
+        target_include_directories(fsoc_real_session_recorder
+            PUBLIC
+                $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+                $<INSTALL_INTERFACE:include>
+                ${OpenCV_INCLUDE_DIRS}
+        )
+        target_compile_features(fsoc_real_session_recorder PUBLIC cxx_std_20)
+        target_link_libraries(fsoc_real_session_recorder PUBLIC opencv_core opencv_imgcodecs fsoc::atomic_file_io)
+        fsoc_set_project_warnings(fsoc_real_session_recorder)
+        fsoc_enable_sanitizers(fsoc_real_session_recorder)
 
         # -------------------------------------------------------------------
         # fsoc_live_support — real-camera perception/tracking/virtual-actuator
@@ -285,7 +342,8 @@ if(FSOC_OPENCV_AVAILABLE)
 
         add_executable(fsoc_live apps/fsoc_live.cpp)
         target_link_libraries(fsoc_live PRIVATE fsoc::live_support fsoc::camera_calibration
-            fsoc::live_frame_publisher opencv_imgcodecs opencv_imgproc)
+            fsoc::live_frame_publisher fsoc::real_session_recorder opencv_imgcodecs opencv_imgproc)
+        target_compile_definitions(fsoc_live PRIVATE FSOC_GIT_COMMIT="${FSOC_GIT_COMMIT}")
         fsoc_set_project_warnings(fsoc_live)
         fsoc_enable_sanitizers(fsoc_live)
     endif()
@@ -664,6 +722,12 @@ if(FSOC_BUILD_TESTS)
             fsoc_set_project_warnings(fsoc_live_frame_publisher_tests)
             fsoc_enable_sanitizers(fsoc_live_frame_publisher_tests)
             add_test(NAME fsoc_live_frame_publisher_tests COMMAND fsoc_live_frame_publisher_tests)
+
+            add_executable(fsoc_real_session_recorder_tests tests/real_session_recorder_tests.cpp)
+            target_link_libraries(fsoc_real_session_recorder_tests PRIVATE fsoc::real_session_recorder)
+            fsoc_set_project_warnings(fsoc_real_session_recorder_tests)
+            fsoc_enable_sanitizers(fsoc_real_session_recorder_tests)
+            add_test(NAME fsoc_real_session_recorder_tests COMMAND fsoc_real_session_recorder_tests)
         endif()
     endif()
 endif()

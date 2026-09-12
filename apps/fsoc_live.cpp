@@ -12,16 +12,39 @@
 //
 // Usage:
 //   fsoc_live --source camera --camera-index 0 --calibration configs/phone_camera.cfg
+//   fsoc_live --source camera --camera-index 0 --uncalibrated
 //   fsoc_live --source camera-url --camera-url "<url>" --calibration configs/phone_camera.cfg
 //
 // Options:
+//   --calibration PATH           real/measured FOV file (see fsoc_camera_calibrate) --
+//                                 exactly one of --calibration or --uncalibrated is required
+//   --uncalibrated               skip calibration entirely: reports PIXEL measurements
+//                                 only. panErrorDeg/tiltErrorDeg/totalErrorDeg are null
+//                                 (there is no real FOV to convert pixels->degrees from),
+//                                 and control/actuation is force-disabled -- a fabricated
+//                                 FOV must never drive a command. Use this to get a real
+//                                 preview + pixel-only tracking running before you have a
+//                                 calibration file. See docs/PHONE_CAMERA_METRICS.md
+//                                 "Camera calibration".
 //   --mode classical|ai|hybrid   (default classical)
 //   --tracker                    enable the P0-v2 alpha-beta estimator
-//   --manual-assist              print human-readable PAN/TILT correction cues
+//   --manual-assist              print human-readable PAN/TILT (or, uncalibrated, pixel)
+//                                 correction cues
 //   --no-control                 observe-only: never compute/apply a command
 //   --seconds N                  stop after N seconds (default: run until Ctrl+C / camera ends)
-//   --live-out DIR               where telemetry.json / frame.jpg are written (default generated/live)
+//   --live-out DIR               where manifest.json / frame_<N>.jpg / telemetry_<N>.json
+//                                 are published (default generated/live)
+//   --record-out DIR             where G2 recordings are written (default
+//                                 generated/real_sessions) -- see fsoc/real_session_recorder.hpp
 //   --ai-model PATH              required when --mode ai or --mode hybrid
+//
+// G2 recording: a browser (or anything else) requests start/stop/mark_event by
+// writing <live-out>/command.txt (key=value, one command at a time -- see
+// read_pending_command() below); this process polls that file once per loop
+// iteration. There is no message queue: two commands written faster than one
+// camera frame interval apart will have the earlier one silently superseded. A
+// human clicking a UI button will not realistically do this; it is a documented
+// limitation, not a bug.
 //
 // Run this YOURSELF, interactively — opening a camera device may trigger an
 // OS permission prompt only a real interactive session can answer.
@@ -29,6 +52,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
+#include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <memory>
@@ -45,6 +69,7 @@
 #include "fsoc/live_frame_publisher.hpp"
 #include "fsoc/live_tracking_session.hpp"
 #include "fsoc/opencv_camera_frame_source.hpp"
+#include "fsoc/real_session_recorder.hpp"
 
 namespace {
 
@@ -52,6 +77,7 @@ struct Args {
     std::optional<int> camera_index{};
     std::optional<std::string> camera_url{};
     std::string calibration_path{};
+    bool uncalibrated = false;
     fsoc::PerceptionMode mode{fsoc::PerceptionMode::Classical};
     std::string ai_model_path{};
     bool tracker = false;
@@ -59,20 +85,57 @@ struct Args {
     bool control_enabled = true;
     double seconds = -1.0;  // -1 = run until stopped
     std::string live_out = "generated/live";
+    std::string record_out = "generated/real_sessions";
 };
+
+// One pending operator command (see the "G2 recording" file comment above).
+// key=value, same house convention as fsoc/live_camera_calibration.hpp -- no JSON
+// library is linked into the C++ core, and this file is written by hand from a
+// tiny Next.js route, so a parser this simple is the honest match for both ends.
+struct LiveCommand {
+    std::string command_id{};
+    std::string action{};  // "start" | "stop" | "mark_event"
+    std::string label{};   // only meaningful for mark_event
+};
+
+// Returns std::nullopt if the file is missing, unreadable, or missing a required
+// key -- callers treat that identically to "no command pending" (never a fatal
+// error: a malformed command must not stop tracking).
+std::optional<LiveCommand> read_pending_command(const std::string& path) {
+    std::ifstream in(path);
+    if (!in) return std::nullopt;
+    LiveCommand cmd{};
+    std::string line;
+    while (std::getline(in, line)) {
+        const auto eq = line.find('=');
+        if (eq == std::string::npos) continue;
+        const std::string key = line.substr(0, eq);
+        const std::string value = line.substr(eq + 1);
+        if (key == "commandId") cmd.command_id = value;
+        else if (key == "action") cmd.action = value;
+        else if (key == "label") cmd.label = value;
+    }
+    if (cmd.command_id.empty() || cmd.action.empty()) return std::nullopt;
+    return cmd;
+}
 
 void print_usage() {
     std::cout
         << "Usage:\n"
         << "  fsoc_live --source camera --camera-index N --calibration PATH [options]\n"
+        << "  fsoc_live --source camera --camera-index N --uncalibrated [options]\n"
         << "  fsoc_live --source camera-url --camera-url URL --calibration PATH [options]\n"
         << "Options:\n"
+        << "  --calibration PATH           real/measured FOV file (see fsoc_camera_calibrate)\n"
+        << "  --uncalibrated               pixel-only mode: no FOV, angular fields are null,\n"
+        << "                                control/actuation force-disabled\n"
         << "  --mode classical|ai|hybrid   (default classical)\n"
         << "  --tracker                    enable the P0-v2 alpha-beta estimator\n"
-        << "  --manual-assist              print human-readable PAN/TILT correction cues\n"
+        << "  --manual-assist              print human-readable correction cues\n"
         << "  --no-control                 observe-only: never compute/apply a command\n"
         << "  --seconds N                  stop after N seconds (default: run until stopped)\n"
-        << "  --live-out DIR               telemetry.json / frame.jpg output dir\n"
+        << "  --live-out DIR               manifest.json / frame_<N>.jpg / telemetry_<N>.json output dir\n"
+        << "  --record-out DIR             G2 recording output dir (default generated/real_sessions)\n"
         << "  --ai-model PATH              required for --mode ai / --mode hybrid\n";
 }
 
@@ -86,6 +149,7 @@ std::optional<Args> parse_args(int argc, char** argv) {
         else if (arg == "--camera-index") args.camera_index = std::stoi(next());
         else if (arg == "--camera-url") args.camera_url = next();
         else if (arg == "--calibration") args.calibration_path = next();
+        else if (arg == "--uncalibrated") args.uncalibrated = true;
         else if (arg == "--mode") {
             const auto v = next();
             if (v == "classical") args.mode = fsoc::PerceptionMode::Classical;
@@ -99,6 +163,7 @@ std::optional<Args> parse_args(int argc, char** argv) {
         else if (arg == "--no-control") args.control_enabled = false;
         else if (arg == "--seconds") args.seconds = std::stod(next());
         else if (arg == "--live-out") args.live_out = next();
+        else if (arg == "--record-out") args.record_out = next();
         else if (arg == "--help" || arg == "-h") { print_usage(); std::exit(0); }
         else { std::cerr << "unrecognized argument '" << arg << "'\n"; print_usage(); return std::nullopt; }
     }
@@ -115,8 +180,14 @@ std::optional<Args> parse_args(int argc, char** argv) {
         std::cerr << "--source camera-url requires --camera-url URL\n";
         return std::nullopt;
     }
-    if (args.calibration_path.empty()) {
-        std::cerr << "--calibration PATH is required (see fsoc_camera_calibrate)\n";
+    if (args.calibration_path.empty() && !args.uncalibrated) {
+        std::cerr << "exactly one of --calibration PATH or --uncalibrated is required\n"
+                     "  (--uncalibrated gives pixel-only measurements with no real FOV --\n"
+                     "  see fsoc_camera_calibrate to produce a real calibration file)\n";
+        return std::nullopt;
+    }
+    if (!args.calibration_path.empty() && args.uncalibrated) {
+        std::cerr << "--calibration and --uncalibrated are mutually exclusive\n";
         return std::nullopt;
     }
     if (args.mode != fsoc::PerceptionMode::Classical && args.ai_model_path.empty()) {
@@ -146,13 +217,29 @@ std::string opt_json(const std::optional<double>& v) {
 // Hand-rolled, minimal JSON (no JSON library is linked into the C++ core —
 // see docs/PHONE_CAMERA_METRICS.md for why). Schema documented in
 // docs/PHONE_CAMERA_METRICS.md "Live telemetry JSON schema".
+// G2: the live telemetry stream is also how the frontend confirms a recording
+// command was actually applied (an accepted HTTP response only means the command
+// file was written -- see the file-header comment on command.txt). recording_id is
+// "" when inactive.
+struct RecordingStatus {
+    bool active = false;
+    std::string recording_id{};
+    std::size_t recorded_frame_count = 0;
+    std::size_t error_count = 0;
+};
+
 std::string to_json(const fsoc::LiveFrameResult& r, fsoc::PerceptionMode mode, bool control_enabled,
-                     const std::string& session_id) {
+                     const std::string& session_id, bool calibrated, const RecordingStatus& recording) {
     std::ostringstream j;
     j << std::fixed << std::setprecision(6);
     j << "{\n"
       << "  \"schemaVersion\": 1,\n"
       << "  \"sessionId\": \"" << json_escape(session_id) << "\",\n"
+      << "  \"recordingActive\": " << (recording.active ? "true" : "false") << ",\n"
+      << "  \"recordingId\": " << (recording.active ? ("\"" + json_escape(recording.recording_id) + "\"") : "null")
+      << ",\n"
+      << "  \"recordedFrameCount\": " << recording.recorded_frame_count << ",\n"
+      << "  \"recordingErrorCount\": " << recording.error_count << ",\n"
       << "  \"frameIndex\": " << r.frame_index << ",\n"
       << "  \"timestampS\": " << r.timestamp_s << ",\n"
       << "  \"dtS\": " << r.dt_s << ",\n"
@@ -177,14 +264,28 @@ std::string to_json(const fsoc::LiveFrameResult& r, fsoc::PerceptionMode mode, b
       << (r.detection.has_value() ? std::to_string(r.detection->centroid_px.y_px) : "null") << ",\n"
       << "  \"pixelErrorXPx\": " << (r.tracking_error.has_value() ? std::to_string(r.tracking_error->pixel.x_px) : "null") << ",\n"
       << "  \"pixelErrorYPx\": " << (r.tracking_error.has_value() ? std::to_string(r.tracking_error->pixel.y_px) : "null") << ",\n"
-      << "  \"panErrorDeg\": " << (r.tracking_error.has_value() ? std::to_string(fsoc::rad_to_deg(r.tracking_error->angular.pan_rad)) : "null") << ",\n"
-      << "  \"tiltErrorDeg\": " << (r.tracking_error.has_value() ? std::to_string(fsoc::rad_to_deg(r.tracking_error->angular.tilt_rad)) : "null") << ",\n"
+      // Angular fields require a real FOV. In --uncalibrated mode the sensing camera is
+      // built from a placeholder FOV purely so the (unused) control math has *some*
+      // angle to compute with -- reporting that placeholder-derived degree value would
+      // look exactly like a real measurement, so it is always null here regardless of
+      // whether compute_tracking_error() produced a value.
+      << "  \"panErrorDeg\": "
+      << ((calibrated && r.tracking_error.has_value())
+              ? std::to_string(fsoc::rad_to_deg(r.tracking_error->angular.pan_rad))
+              : "null")
+      << ",\n"
+      << "  \"tiltErrorDeg\": "
+      << ((calibrated && r.tracking_error.has_value())
+              ? std::to_string(fsoc::rad_to_deg(r.tracking_error->angular.tilt_rad))
+              : "null")
+      << ",\n"
       << "  \"totalErrorDeg\": "
-      << (r.tracking_error.has_value()
+      << ((calibrated && r.tracking_error.has_value())
               ? std::to_string(fsoc::rad_to_deg(
                     std::hypot(r.tracking_error->angular.pan_rad, r.tracking_error->angular.tilt_rad)))
               : "null")
       << ",\n"
+      << "  \"calibrationStatus\": \"" << (calibrated ? "CALIBRATED" : "UNCALIBRATED") << "\",\n"
       << "  \"lockState\": \"" << fsoc::to_string(r.tracked_state.lock_state) << "\",\n"
       << "  \"trackerConfidence\": " << r.tracked_state.confidence << ",\n"
       << "  \"isPrediction\": " << (r.tracked_state.is_prediction ? "true" : "false") << ",\n"
@@ -199,9 +300,23 @@ std::string to_json(const fsoc::LiveFrameResult& r, fsoc::PerceptionMode mode, b
     return j.str();
 }
 
-void print_manual_assist_cue(const fsoc::LiveFrameResult& r) {
+void print_manual_assist_cue(const fsoc::LiveFrameResult& r, bool calibrated) {
     if (!r.tracking_error.has_value()) {
         std::cout << "  [manual-assist] no target -- hold steady / re-acquire\n";
+        return;
+    }
+    // Pixel sign convention (frozen, fsoc/tracking_error.hpp): x_px > 0 => beacon RIGHT
+    // of centre; y_px > 0 => beacon BELOW centre (image +y is down). Same
+    // "which way to move to reduce this" framing as the calibrated cue below, just in
+    // pixels instead of degrees -- --uncalibrated has no real FOV to convert with.
+    if (!calibrated) {
+        const double x_px = r.tracking_error->pixel.x_px;
+        const double y_px = r.tracking_error->pixel.y_px;
+        const char* x_dir = x_px >= 0.0 ? "beacon RIGHT of centre by" : "beacon LEFT of centre by";
+        const char* y_dir = y_px >= 0.0 ? "BELOW centre by" : "ABOVE centre by";
+        std::cout << std::fixed << std::setprecision(1) << "  PIXEL OFFSET (uncalibrated, no degrees)   "
+                  << x_dir << " " << std::abs(x_px) << " px      " << y_dir << " " << std::abs(y_px)
+                  << " px\n";
         return;
     }
     const double pan_deg = fsoc::rad_to_deg(r.tracking_error->angular.pan_rad);
@@ -227,19 +342,31 @@ int main(int argc, char** argv) {
     const Args& args = *parsed;
 
     fsoc::LiveCameraCalibrationConfig calibration{};
-    try {
-        calibration = fsoc::load_live_camera_calibration(args.calibration_path);
-    } catch (const std::exception& e) {
-        std::cerr << "fsoc_live: failed to load calibration: " << e.what() << "\n"
-                  << "  Run fsoc_camera_calibrate first (see docs/PHONE_CAMERA_METRICS.md).\n";
-        return 1;
+    if (args.uncalibrated) {
+        // Default-constructed LiveCameraCalibrationConfig carries the header's
+        // documented PLACEHOLDER hfov/vfov -- never presented to the user as real
+        // degrees (to_json() nulls every angular field when !calibrated). Control is
+        // force-disabled below: a placeholder FOV must never drive a command.
+        calibration = fsoc::LiveCameraCalibrationConfig{};
+        std::cout << "fsoc_live: --uncalibrated -- pixel-only mode, no real field of view. "
+                     "Angular fields will be null and control is disabled.\n";
+    } else {
+        try {
+            calibration = fsoc::load_live_camera_calibration(args.calibration_path);
+        } catch (const std::exception& e) {
+            std::cerr << "fsoc_live: failed to load calibration: " << e.what() << "\n"
+                      << "  Run fsoc_camera_calibrate first (see docs/PHONE_CAMERA_METRICS.md),\n"
+                      << "  or pass --uncalibrated for a pixel-only preview.\n";
+            return 1;
+        }
     }
+    const bool control_enabled = args.control_enabled && !args.uncalibrated;
 
     fsoc::LiveTrackingSessionConfig session_config{};
     session_config.calibration = calibration;
     session_config.perception_mode = args.mode;
     session_config.tracker_enabled = args.tracker;
-    session_config.control_enabled = args.control_enabled;
+    session_config.control_enabled = control_enabled;
     if (args.mode != fsoc::PerceptionMode::Classical) {
         fsoc::AiBeaconDetectorConfig ai_config{};
         ai_config.model_path = args.ai_model_path;
@@ -293,12 +420,31 @@ int main(int argc, char** argv) {
     std::cout << "Source: " << source_info.backend_name << " " << source_info.width_px << "x"
               << source_info.height_px << "  mode=" << fsoc::to_string(args.mode)
               << "  tracker=" << (args.tracker ? "on" : "off")
-              << "  control=" << (args.control_enabled ? "on" : "off") << "\n";
+              << "  control=" << (control_enabled ? "on" : "off")
+              << "  calibration=" << (args.uncalibrated ? "NONE (pixel-only)" : args.calibration_path) << "\n";
     std::cout << "Session: " << session_id << "\n";
     std::cout << "Telemetry: " << args.live_out
               << "/manifest.json (names the current frame_<N>.jpg + telemetry_<N>.json pair, "
                  "polled by Mission Control)\n";
+    std::cout << "Recording: write " << args.live_out
+              << "/command.txt (commandId=..., action=start|stop|mark_event[, label=...]) to control G2 "
+                 "recording; output under "
+              << args.record_out << "/<recording_id>/\n";
     std::cout << "Press Ctrl+C to stop.\n\n";
+
+    std::string cli_args;
+    for (int i = 0; i < argc; ++i) {
+        if (i > 0) cli_args += ' ';
+        cli_args += argv[i];
+    }
+#ifdef FSOC_GIT_COMMIT
+    const std::string software_commit = FSOC_GIT_COMMIT;
+#else
+    const std::string software_commit = "unknown";
+#endif
+
+    std::optional<fsoc::RealSessionRecorder> recorder;
+    std::string last_processed_command_id;
 
     const auto start = std::chrono::steady_clock::now();
     auto last_frame_time = start;
@@ -312,6 +458,61 @@ int main(int argc, char** argv) {
         if (args.seconds > 0.0 && elapsed_s >= args.seconds) {
             std::cout << "Reached --seconds limit. Stopping.\n";
             break;
+        }
+
+        if (auto cmd = read_pending_command(args.live_out + "/command.txt");
+            cmd.has_value() && cmd->command_id != last_processed_command_id) {
+            last_processed_command_id = cmd->command_id;
+            if (cmd->action == "start") {
+                if (recorder.has_value()) {
+                    std::cout << "fsoc_live: recording already active (" << recorder->recording_id()
+                              << "), ignoring duplicate start\n";
+                } else {
+                    fsoc::RealSessionRecorderConfig rec_config{};
+                    rec_config.output_root = args.record_out;
+                    rec_config.session_id = session_id;
+                    rec_config.calibration_status = args.uncalibrated ? "UNCALIBRATED" : "CALIBRATED";
+                    rec_config.calibration_id = args.uncalibrated ? "NONE" : args.calibration_path;
+                    rec_config.perception_mode = fsoc::to_string(args.mode);
+                    rec_config.ai_model_path = args.ai_model_path;
+                    rec_config.software_commit = software_commit;
+                    rec_config.cli_args = cli_args;
+                    rec_config.source_backend = source_info.backend_name;
+                    rec_config.source_description = source_info.description;
+                    rec_config.raw_width_px = source_info.width_px;
+                    rec_config.raw_height_px = source_info.height_px;
+                    rec_config.preprocessed_width_px = session_config.preprocess.target_width_px;
+                    rec_config.preprocessed_height_px = session_config.preprocess.target_height_px;
+                    try {
+                        recorder.emplace(rec_config);
+                        std::cout << "fsoc_live: recording STARTED, id=" << recorder->recording_id() << " -> "
+                                  << args.record_out << "/" << recorder->recording_id() << "/\n";
+                    } catch (const std::exception& e) {
+                        std::cerr << "fsoc_live: failed to start recording: " << e.what() << "\n";
+                        recorder.reset();
+                    }
+                }
+            } else if (cmd->action == "stop") {
+                if (recorder.has_value()) {
+                    recorder->stop();
+                    std::cout << "fsoc_live: recording STOPPED, id=" << recorder->recording_id()
+                              << " frames=" << recorder->recorded_frame_count()
+                              << " errors=" << recorder->error_count() << " events=" << recorder->event_count()
+                              << "\n";
+                    recorder.reset();
+                } else {
+                    std::cout << "fsoc_live: stop requested but no recording is active, ignored\n";
+                }
+            } else if (cmd->action == "mark_event") {
+                if (recorder.has_value()) {
+                    recorder->mark_event(cmd->label);
+                    std::cout << "fsoc_live: event marked: " << cmd->label << "\n";
+                } else {
+                    std::cout << "fsoc_live: mark_event requested but no recording is active, ignored\n";
+                }
+            } else {
+                std::cerr << "fsoc_live: unknown command action '" << cmd->action << "', ignored\n";
+            }
         }
 
         if (!source.read(raw_frame)) {
@@ -342,30 +543,59 @@ int main(int argc, char** argv) {
             continue;
         }
 
+        RecordingStatus recording_status{};
+        if (recorder.has_value()) {
+            recording_status.active = true;
+            recording_status.recording_id = recorder->recording_id();
+            recording_status.recorded_frame_count = recorder->recorded_frame_count();
+            recording_status.error_count = recorder->error_count();
+        }
+        const std::string telemetry_json =
+            to_json(result, args.mode, control_enabled, session_id, !args.uncalibrated, recording_status);
+
         try {
-            publisher->publish(result.frame_index, to_json(result, args.mode, args.control_enabled, session_id),
-                                raw_frame.image);
+            publisher->publish(result.frame_index, telemetry_json, raw_frame.image);
         } catch (const std::exception& e) {
             std::cerr << "fsoc_live: frame " << result.frame_index
                       << " failed to publish (" << e.what() << ") -- skipping this frame's output.\n";
             continue;
         }
 
+        // Recording is a separate sink from the live preview above: it never prunes
+        // and must not be skipped just because, e.g., the live publish's manifest
+        // write raced something transient (that already `continue`d above, so this
+        // line only runs once the frame is confirmed published).
+        if (recorder.has_value()) {
+            recorder->record_frame(result.frame_index, result.timestamp_s, telemetry_json, raw_frame.image);
+        }
+
         std::cout << std::fixed << std::setprecision(2) << "frame " << result.frame_index << "  t="
                   << result.timestamp_s << "s  lock=" << fsoc::to_string(result.tracked_state.lock_state)
                   << "  detected=" << (result.target_detected ? "yes" : "no");
         if (result.tracking_error.has_value()) {
-            std::cout << "  error="
-                      << std::hypot(fsoc::rad_to_deg(result.tracking_error->angular.pan_rad),
-                                    fsoc::rad_to_deg(result.tracking_error->angular.tilt_rad))
-                      << "deg";
+            if (args.uncalibrated) {
+                std::cout << "  error=" << std::hypot(result.tracking_error->pixel.x_px,
+                                                        result.tracking_error->pixel.y_px)
+                          << "px";
+            } else {
+                std::cout << "  error="
+                          << std::hypot(fsoc::rad_to_deg(result.tracking_error->angular.pan_rad),
+                                        fsoc::rad_to_deg(result.tracking_error->angular.tilt_rad))
+                          << "deg";
+            }
         }
         std::cout << "\n";
         if (args.manual_assist) {
-            print_manual_assist_cue(result);
+            print_manual_assist_cue(result, !args.uncalibrated);
         }
     }
 
+    if (recorder.has_value()) {
+        recorder->stop();
+        std::cout << "fsoc_live: finalized recording " << recorder->recording_id()
+                  << " on shutdown (frames=" << recorder->recorded_frame_count()
+                  << " errors=" << recorder->error_count() << ")\n";
+    }
     source.close();
     return 0;
 }

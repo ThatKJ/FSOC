@@ -18,8 +18,8 @@ No motorized pan/tilt hardware yet — G6 stays BLOCKED/out-of-scope until hardw
 |---|---|---|
 | G0 | Audit and source isolation | AUTOMATED PASS — see `docs/LIVE_DATA_AUDIT.md` |
 | G1 | Physical live baseline (real camera → classical tracking → matched frame/telemetry) | AUTOMATED PASS — see below; PHYSICAL PASS pending operator run |
-| G2 | Measurement and data collection (recording, annotation, splits) | BLOCKED (on G1) |
-| G3 | Real-data AI (train/eval TinyBeaconNet on reviewed real captures) | BLOCKED (on G2) |
+| G2 | Measurement and data collection (recording, annotation, splits) | AUTOMATED PASS (software) — real reviewed recordings pending operator |
+| G3 | Real-data AI (train/eval TinyBeaconNet on reviewed real captures) | BLOCKED — no reviewed real recordings exist yet |
 | G4 | Native deployment + application integration | BLOCKED (on G3) |
 | G5 | Demonstration package (evidence export, manual, repeatable demo) | BLOCKED (on G4) |
 | G6 | Physical automatic pointing (motorized hardware) | BLOCKED — no hardware available |
@@ -87,9 +87,35 @@ No motorized pan/tilt hardware yet — G6 stays BLOCKED/out-of-scope until hardw
       `/api/live-camera` returns the correct `frameIndex`/`ageS`/`stale`, and
       `/api/live-camera/frame?frame=<N>` serves the exact matching bytes, 404s on an
       unpublished/pruned index, 400s on a missing index — without opening a camera.
+- [x] **Uncalibrated (pixel-only) mode added** so a real preview never has to wait on
+      calibration. `fsoc_live --uncalibrated` (mutually exclusive with `--calibration
+      PATH`): builds the sensing camera from the header's documented placeholder FOV,
+      but `to_json()` always nulls `panErrorDeg`/`tiltErrorDeg`/`totalErrorDeg` when
+      uncalibrated (regardless of what the placeholder-FOV math internally computes),
+      adds an explicit `calibrationStatus: "UNCALIBRATED"` telemetry field, and
+      force-disables control/actuation (a fabricated FOV must never drive a command).
+      `--manual-assist` and the terminal `error=` line switch to real pixel offsets
+      instead of fabricated degrees in this mode. `/mission/live` shows a
+      **CALIBRATION** row (`CALIBRATED` vs `UNCALIBRATED (pixel-only)`) and a
+      **SESSION ID** row (both new).
+- [x] **Real per-frame timing surfaced, not just implied.** `/mission/live` now shows a
+      TIMING panel: PROCESSED FPS (`1/dtS`, the C++ side's own measured wall-clock
+      interval — explicitly labeled as real per-frame timing, not an exposure
+      timestamp) and DISPLAYED FPS (measured client-side from actual image updates).
+      Poll interval tightened 500ms → 200ms (still ~5-6x below a typical webcam's
+      native 15-30fps — this gap is shown by the two FPS numbers, not hidden).
+- [x] **Frontend risk review, focused (not a re-check of already-verified work):** added
+      `frontend/tests/e2e/live-camera.spec.ts` (6 tests, route-mocked, no camera needed)
+      covering exactly the previously-untested risks — reconnect (new `sessionId`) drops
+      the prior session's displayed frame image, a pruned/missing frame (404) doesn't
+      crash or show a mismatched image, the honest no-session and stale states render
+      distinctly, and the recording panel reflects telemetry (not local optimistic
+      state). `/mission/live` was only covered by generic responsive-layout checks
+      before this.
 - [ ] **PHYSICAL PASS — requires the operator.** Opening a real camera device needs an
       interactive session to answer the OS permission prompt (macOS TCC) — this cannot
-      be done from an unattended shell. See "Next action" below.
+      be done from an unattended shell. See "Camera setup checklist" and "Physical G1
+      review script" below.
 
 Known limitation carried forward (not blocking, documented not hidden): fsoc_live only
 publishes a new manifest/frame/telemetry entry when a frame is successfully read and
@@ -99,9 +125,109 @@ disconnect threshold) is only visible to the frontend indirectly, via the existi
 "camera status" heartbeat written on read failure. Acceptable for G1; worth revisiting
 if real testing shows this staleness signal is too slow to be trusted.
 
-## G2 — G6
+## G2 — Measurement and data collection
 
-Not started.
+**Software: AUTOMATED PASS.** No real reviewed recordings exist yet — that half of G2
+is BLOCKED on the operator (see "Recording assignment" below), and is tracked
+separately from the software.
+
+- [x] **Recording controls.** `/mission/live` has Start/Stop Recording buttons plus
+      three preset event-mark buttons (Covered/Visible/Scene Change), wired through
+      `POST /api/live-camera/record` → `generated/live/command.txt` (key=value,
+      temp-then-rename) → polled once per camera-frame iteration by `fsoc_live`. A 200
+      response only means the command file was written; the UI's RECORDING status
+      always reflects the next polled telemetry (`recordingActive`/`recordingId`/
+      `recordedFrameCount`/`recordingErrorCount`), never local optimistic state — same
+      honesty rule already applied to the camera feed itself. Documented limitation:
+      `command.txt` is a single slot, not a queue — two commands faster than one camera
+      frame interval apart will have the earlier one superseded (unrealistic for a
+      human clicking a button; noted in `apps/fsoc_live.cpp`'s file header).
+- [x] **`fsoc::RealSessionRecorder`** (`include/fsoc/real_session_recorder.hpp`,
+      `src/real_session_recorder.cpp`) — a *second*, separate sink from
+      `LiveFramePublisher`'s pruned preview buffer. Writes, under
+      `generated/real_sessions/<recordingId>/`:
+      `manifest.json` (session/recording id, calibration status+id, perception
+      mode+model path, `softwareCommit` — captured at CMake configure time via `git
+      rev-parse HEAD`, not re-queried at runtime — full `cliArgs`, raw+preprocessed
+      dims, source backend/description, running frame/error/event counters,
+      rewritten atomically after every frame so a crash mid-recording still leaves a
+      valid partial manifest), `frames/frame_<N>.jpg` (RAW, no overlay — every frame
+      accepted is kept, **never pruned**, unlike the live preview buffer),
+      `telemetry.jsonl` (append-only, one line per frame, same content as the live
+      telemetry), `events.jsonl` (human markers, tagged with the last recorded
+      frame). Writes are synchronous per frame (no thread, no in-memory queue) — a
+      disk error increments a counted `error_count()` and is swallowed, never stalls
+      the tracking loop.
+  - 4 new unit tests (`tests/real_session_recorder_tests.cpp`,
+    `fsoc_real_session_recorder_tests`): config validation, a 40-frame recording
+    surviving in full (nothing pruned) with a correct manifest, event markers tagged
+    to the right frame, and a simulated disk-write failure counted, not thrown.
+- [x] **Annotation tool** at `/mission/annotate` (reachable from `/mission/live` →
+      "Review Recordings"). Lists local recordings (`GET /api/real-sessions`), loads
+      one's manifest+telemetry (`GET /api/real-sessions/:id`), serves its raw frames
+      (`GET /api/real-sessions/:id/frame/:index`), and reads/writes reviewed labels
+      (`GET`/`POST /api/real-sessions/:id/labels` → `labels.json`, keyed by frame
+      index so re-labeling a frame updates it rather than appending a duplicate).
+      Supports: frame scrubbing, presence labeling (present / partial occlusion /
+      full occlusion / absent / ambiguous), click-to-set beacon center (in **raw**
+      pixel space — `labelCoordinateSpace: "raw"` recorded explicitly), a detector
+      **suggestion** marker from the recording's own telemetry (visually distinct,
+      never auto-saved — only becomes a label if a human accepts/adjusts it and hits
+      Save), and a reviewed/total progress count. Server-side validation rejects a
+      self-contradictory label (e.g. `present` with no center, `absent` with a
+      center) before it can be saved. Raw frame files on disk are never touched —
+      all overlays are browser-side only.
+  - 4 new e2e tests (`frontend/tests/e2e/annotate.spec.ts`, route-mocked): empty
+    state, save-without-center rejected, click-then-save persists a reviewed label,
+    and navigating frames does not carry over the previous frame's unsaved draft.
+- [x] **Real-data dataset loader** (`tools/ai/real_dataset.py`) — additive to
+      `dataset.py`'s synthetic `BeaconDataset`; the synthetic path is untouched.
+      `RealBeaconDataset` reads reviewed recordings and returns the *same*
+      `(input[1,240,320], heatmap[60,80], present, label_xy[2], difficulty)` tuple
+      shape, so real and synthetic samples can be combined with
+      `torch.utils.data.ConcatDataset` later without special-casing either.
+  - Validates: manifest/labels.json/frames exist; `labelCoordinateSpace == "raw"`;
+    a `present`/`partial_occlusion` label has a center *inside that recording's own*
+    raw frame bounds; an `absent`/`full_occlusion` label has no center; a labeled
+    frame's image file actually exists. Raises `RecordingValidationError` on any of
+    these rather than silently skipping a broken recording.
+  - Exclusion policy (explicit): `ambiguous` and any frame missing from
+    `labels.json` (never reviewed) are excluded from every returned sample —
+    never forced into a positive or negative target.
+  - Coordinate transform: each raw frame is resized to the frozen `common.ORIG_W ×
+    ORIG_H` (640×480) the same way `LivePreprocessConfig` already resizes a real
+    frame before detection, and a label's raw-pixel center is scaled by the *same*
+    per-recording ratio (`_raw_to_orig()` — the one function to touch if crop/mirror
+    is ever added to the real-camera preprocessing pipeline).
+- [x] **Group-based split** (`tools/ai/real_dataset_split.py`) — splits by
+      **recording** (capture group), never by frame; `assign_splits()` raises
+      `ValueError` rather than silently leaving a split empty when there are too few
+      groups (e.g. splitting 1-2 recordings three ways). Deterministic (seeded),
+      persists one JSON manifest (`save_split_manifest`/`load_split_manifest`) so the
+      same partition is reused across runs instead of re-derived. CLI:
+      `python tools/ai/real_dataset_split.py --real-sessions-root generated/real_sessions --out <path>`.
+- [x] **Plumbing tests, clearly-labeled fixtures only**
+      (`tools/ai/real_dataset_tests.py`, 13 checks, run manually — same convention as
+      `selfcheck.py`, not wired into CTest since it needs `.venv-ai`): missing
+      manifest/labels/frame-file all raise; wrong `labelCoordinateSpace` raises;
+      out-of-bounds / missing / contradictory centers raise; `ambiguous` and
+      never-reviewed frames are excluded; a known raw-space label decodes back out
+      (via the frozen heatmap encode/decode round trip) close to its expected
+      resized coordinate; splits have zero group leakage and are deterministic per
+      seed; too-few-groups raises; split manifest round-trips exactly. Explicitly
+      documented as fixtures, not real training data.
+      Run: `.venv-ai/bin/python3 tools/ai/real_dataset_tests.py` (from
+      `tools/ai/`) — **PASS: all 13 checks**.
+- [ ] **Real reviewed recordings.** None exist yet — this is the actual G2/G3
+      dependency on you. See "Recording assignment" below.
+
+## G3 — Real-data AI
+
+**BLOCKED.** Not started, and must not be claimed complete or attempted with
+placeholder data: no reviewed real recordings exist yet, so there is nothing to
+train or evaluate on. Unlocked once the first reviewed batch from "Recording
+assignment" below exists — the dataset loader and split tooling are already built
+and tested against fixtures, ready for that data the moment it exists.
 
 ## Engineering assumptions log
 
@@ -116,43 +242,114 @@ Not started.
   Production capture/detection/control/telemetry stays C++20.
 - `v1_baseline` tag and the synthetic-trained Stage 1–4 AI work are not touched or
   replaced by this task.
+- Recordings/labels/split manifests live under `generated/` (already fully
+  git-ignored) — device-specific, local by default. Nothing under `generated/` is
+  committed; `configs/` stays for reusable *templates* (e.g. an example calibration
+  file), never a guessed real measurement presented as this operator's actual device.
 
-## Next action — operator required (unblocks PHYSICAL PASS for G1)
+## Camera setup checklist — laptop webcam + phone-screen-dot beacon
 
-The live-camera software path is implemented, built, and automatically tested. `configs/`
-is currently empty — no calibration file is committed — and opening a camera device needs
-an interactive session to answer macOS's camera-permission prompt, so this step is yours.
+Verified in this session (commands/flags actually exist and were exercised, short of
+opening a real camera). Run from the repo root unless noted.
 
-The existing `docs/PHONE_CAMERA_GOLDEN_DEMO.md` (step-by-step walkthrough) and
-`docs/PHONE_CAMERA_TEST_PLAN.md` (acceptance matrix M1–M15) already cover this — reuse
-them rather than a new script. They were written against `--camera-index` on a phone
-feeding in over a stream; for your confirmed setup (laptop webcam + phone-screen-dot
-beacon) the only change is the calibration numbers (a laptop webcam's FOV is typically
-narrower than a wide-angle phone lens) and that "point the camera at the phone" replaces
-"point the phone at a monitor."
-
-1. `./build/debug/fsoc_camera_probe` — find your webcam's index and resolution, and
-   answer the OS camera-permission prompt if one appears.
-2. Calibrate (`configs/` is empty, so this file doesn't exist yet):
-   `./build/debug/fsoc_camera_calibrate --manual --width <W> --height <H> --hfov-deg <D> --vfov-deg <D2> --out configs/webcam.cfg`
-   using the resolution from step 1. If you don't know your webcam's FOV, use the
-   `--from-object` form instead (see `docs/PHONE_CAMERA_METRICS.md` "Camera calibration"
-   for the method) — measure a known-width object at a known distance.
-3. Display `tools/beacon_display.html` on your phone (small bright dot, dark background)
-   where the webcam can see it.
-4. `./build/debug/fsoc_live --source camera --camera-index <N> --calibration configs/webcam.cfg --manual-assist`
-   — expect continuous `frame ... lock=... detected=...` lines, and
+1. **Build the camera tools** (if not already built):
+   `cmake --preset debug -DFSOC_ENABLE_OPENCV=ON && cmake --build --preset debug`
+   Confirms via `-- FSOC: OpenCV videoio present - phone-camera-in-the-loop targets
+   enabled` in the configure output.
+2. **Probe for your webcam's index**: `./build/debug/fsoc_camera_probe` (probes
+   indices 0..4 by default; add `--max-index N` for more). Prints a table of
+   resolution/FPS/backend/status per index — note the first `AVAILABLE` one.
+3. **Raw preview — no calibration needed for this step**:
+   `./build/debug/fsoc_camera_view --camera-index <N> --seconds 15 --out-dir generated/camera_view_test --crosshair`
+   (a separate `--out-dir` from `generated/live` avoids any confusion with
+   `fsoc_live`'s own output). Writes periodic JPEG snapshots to that directory —
+   open one to confirm you're actually seeing your webcam, before calibration is
+   ever a blocker.
+4. **The macOS camera-permission prompt** appears the first time step 2 or 3 opens
+   the device from your terminal app. If you don't see a prompt and the probe
+   reports every index `UNAVAILABLE`, permission was likely denied previously —
+   check System Settings → Privacy & Security → Camera and enable it for the
+   terminal app you're running this from, then re-run step 2.
+5. **Calibration — pixel-only fast path (recommended first)**: skip calibration
+   entirely with `fsoc_live --uncalibrated` (see step 6) — no file, no measurement,
+   real pixel-offset tracking immediately, degrees/control explicitly unavailable.
+   For real angular numbers later: `./build/debug/fsoc_camera_calibrate --manual
+   --width <W> --height <H> --hfov-deg <D> --vfov-deg <D2> --out configs/webcam.cfg`
+   using the resolution from step 2 and your webcam's actual spec'd or measured
+   field of view (never copy the simulator's 20°/15°) — or the `--from-object` form
+   (see `docs/PHONE_CAMERA_METRICS.md` "Camera calibration") if you measure a
+   known-width object at a known distance instead. `configs/` is currently empty;
+   treat anything you save there as your own local device file, not something to commit
+   as if it were a universal value.
+6. **Start fsoc_live**: display `tools/beacon_display.html` on your phone (small
+   bright dot, dark background) where the webcam can see it, then:
+   `./build/debug/fsoc_live --source camera --camera-index <N> --uncalibrated --manual-assist`
+   (swap `--uncalibrated` for `--calibration configs/webcam.cfg` once you have one).
+   Expect continuous `frame ... lock=... detected=...` lines and
    `generated/live/manifest.json` + `frame_<N>.jpg` + `telemetry_<N>.json` appearing.
-5. `cd frontend && npm run dev`, open `http://localhost:4317/mission/live` — expect LIVE
-   (not STALE), the real feed with the beacon, `CAMERA SOURCE: REAL_PHONE_CAMERA` /
-   `ACTUATOR: VIRTUAL`, and the pointing-error panel updating as you move the phone.
-6. Work through `docs/PHONE_CAMERA_TEST_PLAN.md` M4–M15 (detection, sign convention,
-   occlusion/coasting, disconnect, Mission Control honesty) — M13/M15 are exactly the
-   disconnect/no-fabrication checks this task cares about; M14 now also implies the new
-   `frameIndex`-matched image/telemetry pairing should hold (no visibly mismatched frame).
-7. Additionally: stop `fsoc_live` (Ctrl+C), confirm the page goes STALE within ~3s, then
-   restart it, and confirm the page picks up the new `sessionId` and drops the old
-   session's last displayed frame rather than showing it under a new "LIVE" label.
+7. **Open Mission Control**: `cd frontend && npm run dev`, then
+   `http://localhost:4317/mission/live`. Expect LIVE (not STALE), the real feed with
+   the beacon, `CALIBRATION: UNCALIBRATED (pixel-only)` (or `CALIBRATED` if you used
+   step 5's file), a SESSION ID, and the pointing-error/TIMING panels updating live.
 
-Report back what you observe (or paste any error) and I'll mark G1 PHYSICAL PASS and
-move to G2 (recording + annotation tooling) — or fix whatever step 1-7 turns up first.
+## Physical G1 review script — run once camera setup above works
+
+Return, for each step: what you saw (screenshot if easy), and any terminal
+output/error. This is what turns G1 from AUTOMATED PASS to PHYSICAL PASS.
+
+1. Show an unpredictable hand movement or a handwritten number to the camera —
+   confirms the feed is current, not a loop/replay (frame index and TIMING numbers
+   should keep advancing).
+2. Show the phone-dot beacon; confirm the pointing-error panel goes non-zero and
+   `targetDetected`/lock state respond.
+3. Move the phone left / right / up / down; confirm the pixel-error/pan-tilt sign
+   matches the direction (see `docs/PHONE_CAMERA_TEST_PLAN.md` M7 for the exact
+   convention).
+4. Cover the beacon while leaving the camera running: confirm lock state changes
+   (or `targetDetected: false`) while the page stays LIVE (camera still connected,
+   just no target) — never a fabricated detection.
+5. Uncover it: confirm reacquisition (lock state returns, `isPrediction: false` on
+   the first fresh detection).
+6. Stop `fsoc_live` (Ctrl+C): confirm the page goes STALE within ~3s, then shows the
+   disconnected/no-session state — no replay, no lingering green "LIVE".
+7. Restart `fsoc_live`: confirm the page shows a **new SESSION ID** and does not
+   keep showing the previous session's last frame under a fresh "LIVE" label.
+8. Note the PROCESSED FPS / DISPLAYED FPS panel values you actually observed — this
+   is the real, measured number, not an assumption.
+
+Also work through `docs/PHONE_CAMERA_TEST_PLAN.md` M4–M15 if you want the fuller
+matrix (M13/M15 are the same disconnect/no-fabrication checks as steps 6-7 above).
+
+## Recording assignment — the first plumbing clip (G2 → unlocks G3)
+
+One ~60-second recording, using the Start/Stop Recording controls on
+`/mission/live` (camera + beacon set up per the checklist above):
+
+1. **0:00–0:15 — stationary beacon.** Don't move the phone or camera.
+2. **0:15–0:30 — slow horizontal then vertical movement.** Pan the phone/beacon
+   left-right, then up-down, slowly enough to stay trackable.
+3. **0:30–0:45 — cover and uncover.** Use the "Mark: Covered" / "Mark: Visible"
+   buttons at the moments you actually cover/uncover it.
+4. **0:45–1:00 — beacon absent.** Point the camera away from the beacon; include
+   another bright object (a lamp, a phone flashlight) in frame if you have one
+   handy — use "Mark: Scene Change" when you do.
+
+Click **Start Recording** before step 1, work through 1-4, then **Stop Recording**.
+The recording lands at `generated/real_sessions/<recordingId>/` (the id is shown in
+the RECORDING panel and in the terminal). Then:
+
+5. Open `http://localhost:4317/mission/annotate`, select that recording, and label
+   a handful of frames across all four segments (present / absent / partial or
+   full occlusion as appropriate) — you don't need to label every frame for this
+   first pass, just enough to prove the workflow: click the beacon center, choose a
+   presence value, hit Save Label, confirm "already reviewed" appears, move to the
+   next frame.
+
+Report back: the `recordingId`, roughly how many frames you labeled, and anything
+that felt broken or confusing in either page. **This first clip only verifies the
+recording/annotation workflow — it is not a sufficient training dataset and not an
+independent evaluation set.** Once it works, I'll give you the next batch: several
+more short sessions (varied distance/brightness/edges-of-frame per
+`docs/LIVE_REALDATA_TASK_STATE.md`'s own future entry once written), with specific
+sessions held out for validation and a separate final test group — collected before
+any training run, per the split tooling above.

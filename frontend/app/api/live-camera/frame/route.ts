@@ -3,6 +3,8 @@ import { readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import path from "node:path";
 
+import { liveDir } from "@/lib/live-camera/paths";
+
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
@@ -26,19 +28,6 @@ export const runtime = "nodejs";
  *   404  that frame index was never published, or has already been pruned
  *   503  no live session / output directory does not exist yet
  */
-
-function repoRoot(): string {
-  return path.resolve(process.cwd(), "..");
-}
-
-function liveDir(): string {
-  const override = process.env.FSOC_LIVE_OUT;
-  return override
-    ? path.isAbsolute(override)
-      ? override
-      : path.resolve(repoRoot(), override)
-    : path.resolve(repoRoot(), "generated", "live");
-}
 
 export async function GET(req: NextRequest) {
   const dir = liveDir();
