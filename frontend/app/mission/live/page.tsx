@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import Link from "next/link";
 
@@ -119,6 +119,7 @@ export default function LiveCameraPage() {
   // derived from the C++ side's own dtS (which is a different, native-processing
   // quantity -- see the PROCESSED row below).
   const displayTimestampsRef = useRef<number[]>([]);
+  const imgRef = useRef<HTMLImageElement>(null);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -186,6 +187,31 @@ export default function LiveCameraPage() {
   }, []);
 
   const stale = ageS != null && ageS > 3;
+
+  // Position a raw-pixel-space point (detector centroid) as a CSS overlay on top of
+  // the displayed <img> -- recomputed on every frame since the poll can resize/replace
+  // the image at any time. object-contain with only max-h/max-w constraints means the
+  // <img> element's own box already hugs the rendered image content (no letterbox gap
+  // to additionally account for), same approach as /mission/annotate.
+  const toOverlayCss = useMemo(() => {
+    if (!imgRef.current || !frame) return null;
+    const el = imgRef.current;
+    // offsetLeft/offsetTop/offsetWidth/offsetHeight are relative to the nearest
+    // positioned ancestor (the `relative` container below, which IS the img's
+    // offsetParent) and already account for the flex-centering gap when the
+    // image doesn't fill the container (object-contain letterboxing) --
+    // getBoundingClientRect() gives viewport coordinates, which silently drops
+    // that offset and was why the reticle sat near the container's corner
+    // instead of on the actual beacon.
+    const w = el.offsetWidth;
+    const h = el.offsetHeight;
+    if (w === 0 || h === 0) return null;
+    return (xRaw: number, yRaw: number) => ({
+      left: `${el.offsetLeft + (xRaw / frame.rawWidthPx) * w}px`,
+      top: `${el.offsetTop + (yRaw / frame.rawHeightPx) * h}px`,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [frame?.frameIndex, frameSrc]);
 
   // Sends a G2 recording command. A 200 here only means the command file was
   // written -- it is NOT proof fsoc_live applied it. This page's recording status
@@ -280,7 +306,22 @@ export default function LiveCameraPage() {
             <div className="relative flex flex-1 items-center justify-center overflow-hidden bg-black">
               {frameSrc && (
                 // eslint-disable-next-line @next/next/no-img-element -- polled, cache-busted local snapshot, not an optimizable static asset
-                <img src={frameSrc} alt="Live camera frame" className="max-h-full max-w-full object-contain" />
+                <img
+                  ref={imgRef}
+                  src={frameSrc}
+                  alt="Live camera frame"
+                  className="max-h-full max-w-full object-contain"
+                />
+              )}
+              {toOverlayCss && frame?.detectedXPx != null && frame?.detectedYPx != null && (
+                <span
+                  className="pointer-events-none absolute h-6 w-6 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-secondary shadow-[0_0_0_1px_rgba(0,0,0,0.6)]"
+                  style={toOverlayCss(frame.detectedXPx, frame.detectedYPx)}
+                  title="detected beacon centroid"
+                >
+                  <span className="absolute left-1/2 top-1/2 h-px w-3 -translate-x-1/2 -translate-y-1/2 bg-secondary" />
+                  <span className="absolute left-1/2 top-1/2 h-3 w-px -translate-x-1/2 -translate-y-1/2 bg-secondary" />
+                </span>
               )}
             </div>
           </Panel>

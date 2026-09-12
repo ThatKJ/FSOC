@@ -80,7 +80,12 @@ export default function AnnotatePage() {
   const [manifest, setManifest] = useState<Manifest | null>(null);
   const [telemetry, setTelemetry] = useState<TelemetryFrame[]>([]);
   const [labelsDoc, setLabelsDoc] = useState<LabelsDoc | null>(null);
-  const [frameIndex, setFrameIndex] = useState(0);
+  // Position WITHIN the telemetry array, not a raw frame number: a recording's
+  // frameIndex values are the camera's own continuous counter across the whole
+  // fsoc_live session, so a recording started partway through often begins at a
+  // large, non-zero frameIndex (e.g. 1000, not 0) -- navigating by array position
+  // is correct regardless of what the first/last real frameIndex happens to be.
+  const [cursor, setCursor] = useState(0);
   const [pendingPresence, setPendingPresence] = useState<Presence | null>(null);
   const [pendingCenter, setPendingCenter] = useState<{ x: number; y: number } | null>(null);
   const [status, setStatus] = useState<string | null>(null);
@@ -96,7 +101,7 @@ export default function AnnotatePage() {
 
   const loadRecording = useCallback((id: string) => {
     setRecordingId(id);
-    setFrameIndex(0);
+    setCursor(0);
     setLoadError(null);
     Promise.all([
       fetch(`/api/real-sessions/${id}`, { cache: "no-store" }).then((r) => r.json()),
@@ -111,7 +116,8 @@ export default function AnnotatePage() {
       .catch((err) => setLoadError(String(err)));
   }, []);
 
-  const currentTelemetry = telemetry.find((t) => t.frameIndex === frameIndex) ?? null;
+  const currentTelemetry = telemetry[cursor] ?? null;
+  const frameIndex = currentTelemetry?.frameIndex ?? 0;
   const existingLabel = labelsDoc?.labels[String(frameIndex)] ?? null;
 
   // Reset the pending (unsaved) label draft whenever the frame changes -- reload
@@ -124,10 +130,10 @@ export default function AnnotatePage() {
         : null,
     );
     setStatus(null);
-    // existingLabel is derived from labelsDoc + frameIndex; depending on it
-    // directly would re-run this after every save, clobbering the just-saved draft.
+    // existingLabel is derived from labelsDoc + cursor; depending on it directly
+    // would re-run this after every save, clobbering the just-saved draft.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [frameIndex, recordingId]);
+  }, [cursor, recordingId]);
 
   function handleImageClick(e: React.MouseEvent<HTMLImageElement>) {
     const img = imgRef.current;
@@ -185,13 +191,20 @@ export default function AnnotatePage() {
 
   const markers = useMemo(() => {
     if (!imgRef.current || !manifest) return null;
-    const rect = imgRef.current.getBoundingClientRect();
+    const el = imgRef.current;
+    // offsetLeft/offsetTop (relative to the `relative` container, the img's
+    // offsetParent) account for the flex-centering gap when the image doesn't
+    // fill its container -- getBoundingClientRect()-based scaling alone drops
+    // that offset and puts the marker near the container's corner instead of on
+    // the actual point (same bug fixed in /mission/live).
+    const w = el.offsetWidth;
+    const h = el.offsetHeight;
     const toCss = (x: number, y: number) => ({
-      left: `${(x / manifest.rawWidthPx) * rect.width}px`,
-      top: `${(y / manifest.rawHeightPx) * rect.height}px`,
+      left: `${el.offsetLeft + (x / manifest.rawWidthPx) * w}px`,
+      top: `${el.offsetTop + (y / manifest.rawHeightPx) * h}px`,
     });
     return { toCss };
-  }, [manifest, frameIndex]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [manifest, cursor]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <Screen pad>
@@ -244,7 +257,7 @@ export default function AnnotatePage() {
         <div className="mt-margin-md flex flex-1 gap-margin-md overflow-hidden">
           <Panel className="flex flex-1 flex-col overflow-hidden">
             <PanelHeader
-              title={`Frame ${frameIndex} / ${Math.max(totalFrames - 1, 0)}`}
+              title={`Frame ${cursor + 1} / ${totalFrames} (frameIndex ${frameIndex})`}
               right={
                 <span className="font-data-mono text-[11px] text-on-surface-variant">
                   reviewed {reviewedCount} / {totalFrames}
@@ -279,24 +292,26 @@ export default function AnnotatePage() {
               <div className="flex gap-margin-sm">
                 <button
                   type="button"
-                  disabled={frameIndex === 0}
-                  onClick={() => setFrameIndex((i) => Math.max(0, i - 1))}
+                  disabled={cursor === 0}
+                  onClick={() => setCursor((c) => Math.max(0, c - 1))}
                   className="border border-outline-variant px-margin-md py-unit text-on-surface disabled:opacity-40"
                 >
                   ← Prev
                 </button>
                 <input
                   type="number"
-                  min={0}
-                  max={Math.max(totalFrames - 1, 0)}
-                  value={frameIndex}
-                  onChange={(e) => setFrameIndex(Math.max(0, Math.min(totalFrames - 1, Number(e.target.value) || 0)))}
+                  min={1}
+                  max={Math.max(totalFrames, 1)}
+                  value={cursor + 1}
+                  onChange={(e) =>
+                    setCursor(Math.max(0, Math.min(totalFrames - 1, (Number(e.target.value) || 1) - 1)))
+                  }
                   className="w-20 border border-outline-variant bg-surface px-margin-sm text-center font-data-mono text-on-surface"
                 />
                 <button
                   type="button"
-                  disabled={frameIndex >= totalFrames - 1}
-                  onClick={() => setFrameIndex((i) => Math.min(totalFrames - 1, i + 1))}
+                  disabled={cursor >= totalFrames - 1}
+                  onClick={() => setCursor((c) => Math.min(totalFrames - 1, c + 1))}
                   className="border border-outline-variant px-margin-md py-unit text-on-surface disabled:opacity-40"
                 >
                   Next →
