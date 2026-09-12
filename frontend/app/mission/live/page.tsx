@@ -29,9 +29,17 @@ function linkButtonClass(variant: "ghost" | "outline") {
  * an honest snapshot-file poll of whatever fsoc_live (a separate, long-running
  * process YOU start yourself) last wrote, not a push/streaming connection.
  * See docs/PHONE_CAMERA_METRICS.md "Mission Control transport".
+ *
+ * Frame/telemetry identity: /api/live-camera returns the frameIndex its
+ * telemetry belongs to; the image is fetched by that EXACT index from
+ * /api/live-camera/frame?frame=<index> (see include/fsoc/live_frame_publisher.hpp).
+ * This page never shows an image fetched independently of the telemetry that
+ * named it -- a 404 on that fetch just skips the image update for this tick.
  */
 
 interface LiveFrame {
+  schemaVersion: number;
+  sessionId: string;
   frameIndex: number;
   timestampS: number;
   dtS: number;
@@ -77,6 +85,8 @@ export default function LiveCameraPage() {
   const [error, setError] = useState<string | null>(null);
   const [frameSrc, setFrameSrc] = useState<string>("");
   const mountedRef = useRef(true);
+  const lastSessionIdRef = useRef<string | null>(null);
+  const frameSrcRef = useRef<string>("");
 
   useEffect(() => {
     mountedRef.current = true;
@@ -88,10 +98,33 @@ export default function LiveCameraPage() {
         const body = await res.json();
         if (!mountedRef.current) return;
         if (res.ok) {
-          setFrame(body.frame);
+          const nextFrame: LiveFrame = body.frame;
+          // A new sessionId (fsoc_live restarted -- a reconnect) must not inherit the
+          // previous session's displayed image: drop it until the new session's own
+          // first frame is confirmed fetched below.
+          if (lastSessionIdRef.current !== null && lastSessionIdRef.current !== nextFrame.sessionId) {
+            if (frameSrcRef.current.startsWith("blob:")) URL.revokeObjectURL(frameSrcRef.current);
+            frameSrcRef.current = "";
+            setFrameSrc("");
+          }
+          lastSessionIdRef.current = nextFrame.sessionId;
+          setFrame(nextFrame);
           setAgeS(body.ageS);
           setError(null);
-          setFrameSrc(`/api/live-camera/frame?t=${Date.now()}`);
+
+          // Fetch the image by the EXACT frame index the telemetry above belongs to
+          // (never a bare "current frame") -- see include/fsoc/live_frame_publisher.hpp.
+          // A 404 (already pruned between the two requests) just skips this tick's
+          // image update rather than showing a mismatched frame.
+          const frameRes = await fetch(`/api/live-camera/frame?frame=${body.frameIndex}`, {
+            cache: "no-store",
+          });
+          if (mountedRef.current && frameRes.ok) {
+            const blob = await frameRes.blob();
+            if (frameSrcRef.current.startsWith("blob:")) URL.revokeObjectURL(frameSrcRef.current);
+            frameSrcRef.current = URL.createObjectURL(blob);
+            setFrameSrc(frameSrcRef.current);
+          }
         } else {
           setError(body.detail ?? body.error ?? "unknown error");
         }
@@ -106,6 +139,7 @@ export default function LiveCameraPage() {
     return () => {
       mountedRef.current = false;
       clearTimeout(timer);
+      if (frameSrcRef.current.startsWith("blob:")) URL.revokeObjectURL(frameSrcRef.current);
     };
   }, []);
 

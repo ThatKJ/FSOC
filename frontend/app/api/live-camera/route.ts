@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { readFile } from "node:fs/promises";
-import { existsSync, statSync } from "node:fs";
+import { existsSync } from "node:fs";
 import path from "node:path";
 
 export const dynamic = "force-dynamic";
@@ -9,62 +9,89 @@ export const runtime = "nodejs";
 /**
  * SERVER-ONLY. Mobile Phone Camera-in-the-Loop milestone.
  *
- *   fsoc_live (long-running C++ process, real camera) -> generated/live/telemetry.json
- *           -> (this route, polled) -> browser
+ *   fsoc_live (long-running C++ process, real camera)
+ *     -> generated/live/manifest.json (names the current frame_<N>.jpg /
+ *        telemetry_<N>.json pair, flipped atomically only AFTER both files
+ *        are fully written -- see include/fsoc/live_frame_publisher.hpp and
+ *        docs/LIVE_DATA_AUDIT.md section 2)
+ *     -> (this route, polled) -> browser
  *
  * fsoc_live is a long-running process (a real camera session has no natural
  * "end of run" the way a deterministic scenario does), so it cannot be
  * invoked per-request the way /api/simulation/:scenario invokes fsoc_demo.
- * Instead it overwrites one JSON file after every processed frame; this
- * route is a plain snapshot read of whatever is currently on disk. This is
- * an honest polling read, not a live stream -- the frontend must poll it
- * (see docs/PHONE_CAMERA_METRICS.md "Live telemetry JSON schema" and
- * "Mission Control transport").
+ * This route reads the manifest, then reads exactly the telemetry file it
+ * names -- LiveFramePublisher's atomicity guarantee means that file is
+ * always complete by the time the manifest can be observed naming it. The
+ * frame index returned here is what the client must request from
+ * /api/live-camera/frame?frame=<index> -- never a bare "current frame.jpg" --
+ * so the served image and the served telemetry are guaranteed to describe
+ * the same camera frame, not two independently-polled snapshots.
  *
  * GET /api/live-camera
- *   200  the most recent frame fsoc_live wrote, plus staleness info
- *   503  no live session is running / no telemetry has been written yet
+ *   200  the current (frameIndex-identified) telemetry, plus staleness info
+ *   503  no live session is running / no telemetry has been published yet
  */
 
 function repoRoot(): string {
   return path.resolve(process.cwd(), "..");
 }
 
-function telemetryPath(): string {
+function liveDir(): string {
   const override = process.env.FSOC_LIVE_OUT;
-  const dir = override ? (path.isAbsolute(override) ? override : path.resolve(repoRoot(), override))
-                        : path.resolve(repoRoot(), "generated", "live");
-  return path.join(dir, "telemetry.json");
+  return override
+    ? path.isAbsolute(override)
+      ? override
+      : path.resolve(repoRoot(), override)
+    : path.resolve(repoRoot(), "generated", "live");
+}
+
+interface Manifest {
+  schemaVersion: number;
+  frameIndex: number;
+  frameFile: string;
+  telemetryFile: string;
+  publishedAtEpochMs: number;
 }
 
 export async function GET() {
-  const file = telemetryPath();
-  if (!existsSync(file)) {
+  const dir = liveDir();
+  const manifestPath = path.join(dir, "manifest.json");
+  if (!existsSync(manifestPath)) {
     return NextResponse.json(
       {
         error: "no live session",
         detail:
-          "generated/live/telemetry.json does not exist. Start fsoc_live yourself " +
+          "generated/live/manifest.json does not exist. Start fsoc_live yourself " +
           "(see docs/PHONE_CAMERA_GOLDEN_DEMO.md) -- this route never fabricates telemetry.",
       },
       { status: 503, headers: { "cache-control": "no-store" } },
     );
   }
 
+  let manifest: Manifest;
   try {
-    const raw = await readFile(file, "utf8");
-    const frame = JSON.parse(raw);
-    const ageS = (Date.now() - statSync(file).mtimeMs) / 1000;
+    manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+  } catch (err) {
+    // Extremely unlikely (manifest is written via temp-then-rename), but a read can
+    // still race a rename mid-flight on some filesystems -- report it as a clean,
+    // retryable miss, never as fabricated telemetry.
     return NextResponse.json(
-      { frame, ageS, stale: ageS > 3 },
+      { error: "manifest read failed (likely mid-write, retry)", detail: String(err) },
+      { status: 503, headers: { "cache-control": "no-store" } },
+    );
+  }
+
+  const telemetryPath = path.join(dir, manifest.telemetryFile);
+  try {
+    const frame = JSON.parse(await readFile(telemetryPath, "utf8"));
+    const ageS = (Date.now() - manifest.publishedAtEpochMs) / 1000;
+    return NextResponse.json(
+      { frame, frameIndex: manifest.frameIndex, ageS, stale: ageS > 3 },
       { headers: { "cache-control": "no-store" } },
     );
   } catch (err) {
-    // A partial write (fsoc_live overwrites the file every frame, non-
-    // atomically) can race a read. Report it as a clean, retryable miss --
-    // never as fabricated telemetry.
     return NextResponse.json(
-      { error: "telemetry read failed (likely mid-write, retry)", detail: String(err) },
+      { error: "telemetry read failed for the manifest's current frame, retry", detail: String(err) },
       { status: 503, headers: { "cache-control": "no-store" } },
     );
   }

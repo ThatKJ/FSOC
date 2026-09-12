@@ -226,6 +226,26 @@ if(FSOC_OPENCV_AVAILABLE)
 
     if(FSOC_FRAME_SOURCE_AVAILABLE)
         # -------------------------------------------------------------------
+        # fsoc_live_frame_publisher — atomic, frame-identity-safe local file
+        # transport for fsoc_live's long-running (no finite CSV) output. Pure
+        # I/O sink: depends only on OpenCV core/imgcodecs, never on
+        # fsoc::core/perception/control. See docs/LIVE_DATA_AUDIT.md section 2
+        # for the gap this closes.
+        # -------------------------------------------------------------------
+        add_library(fsoc_live_frame_publisher src/live_frame_publisher.cpp)
+        add_library(fsoc::live_frame_publisher ALIAS fsoc_live_frame_publisher)
+        target_include_directories(fsoc_live_frame_publisher
+            PUBLIC
+                $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+                $<INSTALL_INTERFACE:include>
+                ${OpenCV_INCLUDE_DIRS}
+        )
+        target_compile_features(fsoc_live_frame_publisher PUBLIC cxx_std_20)
+        target_link_libraries(fsoc_live_frame_publisher PUBLIC opencv_core opencv_imgcodecs)
+        fsoc_set_project_warnings(fsoc_live_frame_publisher)
+        fsoc_enable_sanitizers(fsoc_live_frame_publisher)
+
+        # -------------------------------------------------------------------
         # fsoc_live_support — real-camera perception/tracking/virtual-actuator
         # orchestration (LiveTrackingSession), the real-camera counterpart to
         # fsoc_simulation (which similarly backs fsoc_demo via
@@ -264,7 +284,8 @@ if(FSOC_OPENCV_AVAILABLE)
         fsoc_enable_sanitizers(fsoc_camera_view)
 
         add_executable(fsoc_live apps/fsoc_live.cpp)
-        target_link_libraries(fsoc_live PRIVATE fsoc::live_support fsoc::camera_calibration opencv_imgcodecs opencv_imgproc)
+        target_link_libraries(fsoc_live PRIVATE fsoc::live_support fsoc::camera_calibration
+            fsoc::live_frame_publisher opencv_imgcodecs opencv_imgproc)
         fsoc_set_project_warnings(fsoc_live)
         fsoc_enable_sanitizers(fsoc_live)
     endif()
@@ -637,6 +658,12 @@ if(FSOC_BUILD_TESTS)
             fsoc_set_project_warnings(fsoc_live_tracking_session_tests)
             fsoc_enable_sanitizers(fsoc_live_tracking_session_tests)
             add_test(NAME fsoc_live_tracking_session_tests COMMAND fsoc_live_tracking_session_tests)
+
+            add_executable(fsoc_live_frame_publisher_tests tests/live_frame_publisher_tests.cpp)
+            target_link_libraries(fsoc_live_frame_publisher_tests PRIVATE fsoc::live_frame_publisher)
+            fsoc_set_project_warnings(fsoc_live_frame_publisher_tests)
+            fsoc_enable_sanitizers(fsoc_live_frame_publisher_tests)
+            add_test(NAME fsoc_live_frame_publisher_tests COMMAND fsoc_live_frame_publisher_tests)
         endif()
     endif()
 endif()

@@ -29,7 +29,6 @@
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
-#include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <memory>
@@ -43,6 +42,7 @@
 
 #include "fsoc/config.hpp"
 #include "fsoc/live_camera_calibration.hpp"
+#include "fsoc/live_frame_publisher.hpp"
 #include "fsoc/live_tracking_session.hpp"
 #include "fsoc/opencv_camera_frame_source.hpp"
 
@@ -146,10 +146,13 @@ std::string opt_json(const std::optional<double>& v) {
 // Hand-rolled, minimal JSON (no JSON library is linked into the C++ core —
 // see docs/PHONE_CAMERA_METRICS.md for why). Schema documented in
 // docs/PHONE_CAMERA_METRICS.md "Live telemetry JSON schema".
-std::string to_json(const fsoc::LiveFrameResult& r, fsoc::PerceptionMode mode, bool control_enabled) {
+std::string to_json(const fsoc::LiveFrameResult& r, fsoc::PerceptionMode mode, bool control_enabled,
+                     const std::string& session_id) {
     std::ostringstream j;
     j << std::fixed << std::setprecision(6);
     j << "{\n"
+      << "  \"schemaVersion\": 1,\n"
+      << "  \"sessionId\": \"" << json_escape(session_id) << "\",\n"
       << "  \"frameIndex\": " << r.frame_index << ",\n"
       << "  \"timestampS\": " << r.timestamp_s << ",\n"
       << "  \"dtS\": " << r.dt_s << ",\n"
@@ -267,14 +270,34 @@ int main(int argc, char** argv) {
     }
     const fsoc::FrameSourceInfo source_info = source.info();
 
-    std::system(("mkdir -p " + args.live_out).c_str());
+    // A reconnect (re-running fsoc_live) must start a new session identity — never
+    // reuse the previous run's id, so a client can tell a fresh session from a
+    // resumed one even if it never observed the disconnect itself.
+    const std::string session_id = std::to_string(
+        std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch())
+            .count());
+
+    fsoc::LiveFramePublisherConfig publisher_config{};
+    publisher_config.output_dir = args.live_out;
+    std::optional<fsoc::LiveFramePublisher> publisher;
+    try {
+        publisher.emplace(publisher_config);
+    } catch (const std::exception& e) {
+        std::cerr << "fsoc_live: failed to prepare --live-out directory '" << args.live_out
+                  << "': " << e.what() << "\n";
+        source.close();
+        return 1;
+    }
+
     std::cout << "FSOC LIVE -- CAMERA SOURCE = REAL_PHONE_CAMERA   ACTUATOR = VIRTUAL\n";
     std::cout << "Source: " << source_info.backend_name << " " << source_info.width_px << "x"
               << source_info.height_px << "  mode=" << fsoc::to_string(args.mode)
               << "  tracker=" << (args.tracker ? "on" : "off")
               << "  control=" << (args.control_enabled ? "on" : "off") << "\n";
-    std::cout << "Telemetry: " << args.live_out << "/telemetry.json + " << args.live_out
-              << "/frame.jpg (polled by Mission Control)\n";
+    std::cout << "Session: " << session_id << "\n";
+    std::cout << "Telemetry: " << args.live_out
+              << "/manifest.json (names the current frame_<N>.jpg + telemetry_<N>.json pair, "
+                 "polled by Mission Control)\n";
     std::cout << "Press Ctrl+C to stop.\n\n";
 
     const auto start = std::chrono::steady_clock::now();
@@ -319,10 +342,14 @@ int main(int argc, char** argv) {
             continue;
         }
 
-        std::ofstream telemetry_file(args.live_out + "/telemetry.json", std::ios::trunc);
-        telemetry_file << to_json(result, args.mode, args.control_enabled);
-        telemetry_file.close();
-        cv::imwrite(args.live_out + "/frame.jpg", raw_frame.image);
+        try {
+            publisher->publish(result.frame_index, to_json(result, args.mode, args.control_enabled, session_id),
+                                raw_frame.image);
+        } catch (const std::exception& e) {
+            std::cerr << "fsoc_live: frame " << result.frame_index
+                      << " failed to publish (" << e.what() << ") -- skipping this frame's output.\n";
+            continue;
+        }
 
         std::cout << std::fixed << std::setprecision(2) << "frame " << result.frame_index << "  t="
                   << result.timestamp_s << "s  lock=" << fsoc::to_string(result.tracked_state.lock_state)
